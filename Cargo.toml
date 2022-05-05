@@ -1,0 +1,17 @@
+[package]
+name = "bridge_differential_tests"
+authors = ["Marco Serrano <marcoTheWebDev@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+blake3 = "1.2.0"
+clap = { version = "3.1.15", features = ["derive"] }
+ed25519-compact = "1.0.11"
+hex = "0.4.3"
+stdcode = "0.1.2"
+themelio-stf = "0.9.7"
+themelio-structs = "0.2.0"
+tmelcrypt = "0.2.3"
