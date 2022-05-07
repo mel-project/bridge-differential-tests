@@ -48,12 +48,12 @@ fn main() {
     let args = Args::parse();
 
     if args.blake3.len() > 0 {
-        let data = hex::decode(args.blake3)
+        let data = hex::decode(args.blake3.strip_prefix("0x").unwrap())
             .expect("Unable to convert input to bytes.");
 
         print!("0x{}", blake3_differential(&data));
     } else if args.ed25519 {
-        print!("{}", ed25519_differential());
+        print!("0x{}", ed25519_differential());
     } else {
         print!("0x")
     }
