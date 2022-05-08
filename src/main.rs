@@ -30,8 +30,8 @@ struct Args {
     #[clap(short, long, default_value = "")]
     blake3: String,
 
-    #[clap(short, long)]
-    ed25519: bool,
+    #[clap(short, long, default_value = "")]
+    ed25519: String,
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -40,8 +40,12 @@ fn blake3_differential(data: &[u8]) -> String {
     hex::encode(hash)
 }
 
-fn ed25519_differential() -> String {
-    String::from("Coming soon.")
+fn ed25519_differential(data: &[u8]) -> (String, String) {
+    let keypair = KeyPair::from_seed(Seed::default());
+
+    let signature = keypair.sk.sign(data, Some(Noise::generate()));
+
+    (hex::encode(*keypair.pk), hex::encode(*signature))
 }
 
 fn main() {
@@ -49,11 +53,16 @@ fn main() {
 
     if args.blake3.len() > 0 {
         let data = hex::decode(args.blake3.strip_prefix("0x").unwrap())
-            .expect("Unable to convert input to bytes.");
+            .expect("0x00000000000000000000000000000000000000000000000000000000000000056572726f72000000000000000000000000000000000000000000000000000000");
 
         print!("0x{}", blake3_differential(&data));
-    } else if args.ed25519 {
-        print!("0x{}", ed25519_differential());
+    } else if args.ed25519.len() > 0 {
+        let data = hex::decode(args.ed25519.strip_prefix("0x").unwrap())
+            .expect("0x00000000000000000000000000000000000000000000000000000000000000056572726f72000000000000000000000000000000000000000000000000000000");
+
+        let key_and_signature = ed25519_differential(&data);
+
+        print!("0x{}{}", key_and_signature.0, key_and_signature.1);
     } else {
         print!("0x")
     }
