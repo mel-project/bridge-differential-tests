@@ -32,6 +32,9 @@ struct Args {
 
     #[clap(short, long, default_value = "")]
     ed25519: String,
+
+    #[clap(short, long, default_value = "")]
+    decode_integer: String,
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -46,6 +49,13 @@ fn ed25519_differential(data: &[u8]) -> (String, String) {
     let signature = keypair.sk.sign(data, Some(Noise::generate()));
 
     (hex::encode(*keypair.pk), hex::encode(*signature))
+}
+
+fn decode_integer_differential(integer: u128) -> String {
+    let encoded_integer = stdcode::serialize(&integer)
+        .expect("0x00000000000000000000000000000000000000000000000000000000000000056572726f72000000000000000000000000000000000000000000000000000000");
+
+    hex::encode(encoded_integer)
 }
 
 fn main() {
@@ -63,7 +73,14 @@ fn main() {
         let key_and_signature = ed25519_differential(&data);
 
         print!("0x{}{}", key_and_signature.0, key_and_signature.1);
+    } else if args.decode_integer.len() > 0 {
+        let integer: u128 = args.decode_integer.parse()
+            .expect("0x00000000000000000000000000000000000000000000000000000000000000056572726f72000000000000000000000000000000000000000000000000000000");
+
+        let encoded_integer = decode_integer_differential(integer);
+
+        print!("0x{}", encoded_integer);
     } else {
-        print!("0x")
+        print!("0x");
     }
 }
