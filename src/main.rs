@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::fmt::LowerHex;
 use std::{env, io};
 use std::ops::{Range, Deref};
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use blake3;
 use clap::Parser;
 use ed25519_compact::{KeyPair, Signature, Seed, Noise};
 use themelio_structs::{
-    Address as ThemelioAddress,
+    Address,
     BlockHeight,
     CoinData,
     CoinID,
@@ -41,11 +42,14 @@ struct Args {
     #[clap(short, long, default_value = "")]
     slice: String,
 
-    #[clap(long, default_value_t = 0, allow_hyphen_values = true)]
+    #[clap(long, default_value_t = 0)]
     start: isize,
 
     #[clap(long, default_value_t = 0, allow_hyphen_values = true)]
     end: isize,
+
+    #[clap(short, long, default_value = "")]
+    integer_size: String
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -70,6 +74,15 @@ fn decode_integer_differential(integer: u128) -> String {
         .expect(ERR_STRING);
 
     hex::encode(encoded_integer)
+}
+
+fn integer_size_differential(integer: u128) -> (String, String) {
+    let encoded_integer = stdcode::serialize(&integer)
+        .expect(ERR_STRING);
+
+    let encoded_integer_length = encoded_integer.len() as u128;
+
+    (hex::encode(encoded_integer), format!("{:x}", encoded_integer_length))
 }
 
 fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
@@ -115,13 +128,14 @@ fn main() {
         let data = hex::decode(args.slice.strip_prefix("0x").unwrap())
             .expect(ERR_STRING);
 
-        // let start: usize = args.start.parse()
-        //     .expect(ERR_STRING);
-
-        // let end: usize = args.end.parse()
-        //     .expect(ERR_STRING);
-
         print!("0x{}", slice_differential(&data, args.start, args.end));
+    } else if args.integer_size.len() > 0 {
+        let integer: u128 = args.integer_size.parse()
+            .expect(ERR_STRING);
+    
+        let encoded_integer_and_size = integer_size_differential(integer);
+
+        print!("0x{:0>64}{:0>64}", encoded_integer_and_size.0, encoded_integer_and_size.1);
     } else {
         print!("0x");
     }
