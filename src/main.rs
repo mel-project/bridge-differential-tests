@@ -7,6 +7,7 @@ use std::sync::Arc;
 use blake3;
 use clap::Parser;
 use ed25519_compact::{KeyPair, Signature, Seed, Noise};
+use rand::Rng;
 use themelio_structs::{
     Address,
     BlockHeight,
@@ -30,17 +31,14 @@ const ERR_STRING: &str = "0x4572726f7220696e204646492070726f6772616d2e";
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(short, long, default_value = "")]
+    #[clap(long, default_value = "")]
     blake3: String,
 
-    #[clap(short, long, default_value = "")]
+    #[clap(long, default_value = "")]
     ed25519: String,
 
-    #[clap(short, long, default_value = "")]
+    #[clap(long, default_value = "")]
     decode_integer: String,
-
-    #[clap(short, long, default_value = "")]
-    slice: String,
 
     #[clap(long, default_value_t = 0)]
     start: isize,
@@ -48,8 +46,14 @@ struct Args {
     #[clap(long, default_value_t = 0, allow_hyphen_values = true)]
     end: isize,
 
-    #[clap(short, long, default_value = "")]
-    integer_size: String
+    #[clap(long, default_value = "")]
+    integer_size: String,
+
+    #[clap(long, default_value = "")]
+    slice: String,
+
+    #[clap(long, default_value = "")]
+    extract_merkle_root: String
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -61,12 +65,12 @@ fn blake3_differential(data: &[u8]) -> String {
     hex::encode(hash)
 }
 
-fn ed25519_differential(data: &[u8]) -> (String, String) {
+fn ed25519_differential(data: &[u8]) -> String {
     let keypair = KeyPair::from_seed(Seed::default());
 
     let signature = keypair.sk.sign(data, Some(Noise::generate()));
 
-    (hex::encode(*keypair.pk), hex::encode(*signature))
+    format!("{}{}", hex::encode(*keypair.pk), hex::encode(*signature))
 }
 
 fn decode_integer_differential(integer: u128) -> String {
@@ -102,6 +106,65 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
     }
 }
 
+fn extract_merkle_root_differential(number: u128) -> String {
+    let header: Header;
+    
+    if number == 0 {
+        header = Header {
+            network: NetID::Mainnet,
+            previous: HashVal::random(),
+            height: BlockHeight(u64::MIN),
+            history_hash: HashVal::random(),
+            coins_hash: HashVal::random(),
+            transactions_hash: HashVal::random(),
+            fee_pool: CoinValue(u128::MIN),
+            fee_multiplier: u128::MIN,
+            dosc_speed: u128::MIN,
+            pools_hash: HashVal::random(),
+            stakes_hash: HashVal::random(),
+        };
+    } else if number == u128::MAX {
+        header = Header {
+            network: NetID::Mainnet,
+            previous: HashVal::random(),
+            height: BlockHeight(u64::MAX),
+            history_hash: HashVal::random(),
+            coins_hash: HashVal::random(),
+            transactions_hash: HashVal::random(),
+            fee_pool: CoinValue(u128::MAX),
+            fee_multiplier: u128::MAX,
+            dosc_speed: u128::MAX,
+            pools_hash: HashVal::random(),
+            stakes_hash: HashVal::random(),
+        };
+    } else {
+        header = Header {
+            network: NetID::Mainnet,
+            previous: HashVal::random(),
+            height: BlockHeight(rand::thread_rng().gen()),
+            history_hash: HashVal::random(),
+            coins_hash: HashVal::random(),
+            transactions_hash: HashVal::random(),
+            fee_pool: CoinValue(rand::thread_rng().gen()),
+            fee_multiplier: rand::thread_rng().gen(),
+            dosc_speed: rand::thread_rng().gen(),
+            pools_hash: HashVal::random(),
+            stakes_hash: HashVal::random(),
+        };
+    }
+
+    let mut serialized_header = stdcode::serialize(&header)
+        .expect(ERR_STRING);
+
+    let serialized_header_length = serialized_header.len();
+
+    let padding_length = serialized_header.len() % 64;
+
+    serialized_header.resize(serialized_header_length + padding_length, 0);
+
+    format!("{:0>64x}{}{:0>64x}{:0<64}", 0x40, hex::encode(header.transactions_hash), serialized_header_length, hex::encode(serialized_header))
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -116,7 +179,7 @@ fn main() {
 
         let key_and_signature = ed25519_differential(&data);
 
-        print!("0x{}{}", key_and_signature.0, key_and_signature.1);
+        print!("0x{}", key_and_signature);
     } else if args.decode_integer.len() > 0 {
         let integer: u128 = args.decode_integer.parse()
             .expect(ERR_STRING);
@@ -124,18 +187,27 @@ fn main() {
         let encoded_integer = decode_integer_differential(integer);
 
         print!("0x{}", encoded_integer);
-    } else if args.slice.len() > 0 {
-        let data = hex::decode(args.slice.strip_prefix("0x").unwrap())
-            .expect(ERR_STRING);
-
-        print!("0x{}", slice_differential(&data, args.start, args.end));
     } else if args.integer_size.len() > 0 {
-        let integer: u128 = args.integer_size.parse()
+        let integer: u128 = args.integer_size
+            .parse()
             .expect(ERR_STRING);
     
         let abi_encoded_integer_and_size = integer_size_differential(integer);
 
         print!("0x{}", abi_encoded_integer_and_size);
+    } else if args.slice.len() > 0 {
+        let data = hex::decode(args.slice.strip_prefix("0x").unwrap())
+            .expect(ERR_STRING);
+
+        print!("0x{}", slice_differential(&data, args.start, args.end));
+    } else if args.extract_merkle_root.len() > 0 {
+        let modifier: u128 = args.extract_merkle_root
+            .parse()
+            .expect(ERR_STRING);
+
+        let serialized_header_and_root = extract_merkle_root_differential(modifier);
+
+        print!("0x{}", serialized_header_and_root);
     } else {
         print!("0x");
     }
