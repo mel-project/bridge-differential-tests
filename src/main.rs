@@ -53,7 +53,13 @@ struct Args {
     slice: String,
 
     #[clap(long, default_value = "")]
-    extract_merkle_root: String
+    extract_merkle_root: String,
+
+    #[clap(long, default_value = "")]
+    extract_block_height: String,
+
+    #[clap(long, default_value = "")]
+    modifier: String
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -106,11 +112,9 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
     }
 }
 
-fn extract_merkle_root_differential(number: u128) -> String {
-    let header: Header;
-    
-    if number == 0 {
-        header = Header {
+fn random_header(modifier: u128) -> Header {
+    if modifier == 0 {
+        Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
             height: BlockHeight(u64::MIN),
@@ -122,9 +126,65 @@ fn extract_merkle_root_differential(number: u128) -> String {
             dosc_speed: u128::MIN,
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
-        };
-    } else if number == u128::MAX {
-        header = Header {
+        }
+    } else if modifier == u8::MAX.into() {
+        Header {
+            network: NetID::Mainnet,
+            previous: HashVal::random(),
+            height: BlockHeight(u8::MAX.into()),
+            history_hash: HashVal::random(),
+            coins_hash: HashVal::random(),
+            transactions_hash: HashVal::random(),
+            fee_pool: CoinValue(u8::MAX.into()),
+            fee_multiplier: u8::MAX.into(),
+            dosc_speed: u8::MAX.into(),
+            pools_hash: HashVal::random(),
+            stakes_hash: HashVal::random(),
+        }
+    } else if modifier == u16::MAX.into() {
+        Header {
+            network: NetID::Mainnet,
+            previous: HashVal::random(),
+            height: BlockHeight(u16::MAX.into()),
+            history_hash: HashVal::random(),
+            coins_hash: HashVal::random(),
+            transactions_hash: HashVal::random(),
+            fee_pool: CoinValue(u16::MAX.into()),
+            fee_multiplier: u16::MAX.into(),
+            dosc_speed: u16::MAX.into(),
+            pools_hash: HashVal::random(),
+            stakes_hash: HashVal::random(),
+        }
+    } else if modifier == u32::MAX.into() {
+        Header {
+            network: NetID::Mainnet,
+            previous: HashVal::random(),
+            height: BlockHeight(u32::MAX.into()),
+            history_hash: HashVal::random(),
+            coins_hash: HashVal::random(),
+            transactions_hash: HashVal::random(),
+            fee_pool: CoinValue(u32::MAX.into()),
+            fee_multiplier: u32::MAX.into(),
+            dosc_speed: u32::MAX.into(),
+            pools_hash: HashVal::random(),
+            stakes_hash: HashVal::random(),
+        }
+    } else if modifier == u64::MAX.into() {
+        Header {
+            network: NetID::Mainnet,
+            previous: HashVal::random(),
+            height: BlockHeight(u64::MAX),
+            history_hash: HashVal::random(),
+            coins_hash: HashVal::random(),
+            transactions_hash: HashVal::random(),
+            fee_pool: CoinValue(u64::MAX.into()),
+            fee_multiplier: u64::MAX.into(),
+            dosc_speed: u64::MAX.into(),
+            pools_hash: HashVal::random(),
+            stakes_hash: HashVal::random(),
+        }
+    } else if modifier == u128::MAX {
+        Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
             height: BlockHeight(u64::MAX),
@@ -136,9 +196,9 @@ fn extract_merkle_root_differential(number: u128) -> String {
             dosc_speed: u128::MAX,
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
-        };
+        }
     } else {
-        header = Header {
+        Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
             height: BlockHeight(rand::thread_rng().gen()),
@@ -150,20 +210,40 @@ fn extract_merkle_root_differential(number: u128) -> String {
             dosc_speed: rand::thread_rng().gen(),
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
-        };
+        }
     }
+}
 
-    let mut serialized_header = stdcode::serialize(&header)
+    fn extract_merkle_root_differential(modifier: u128) -> String {
+        let header = random_header(modifier);
+            
+        let mut serialized_header = stdcode::serialize(&header)
         .expect(ERR_STRING);
 
-    let serialized_header_length = serialized_header.len();
+        let serialized_header_length = serialized_header.len();
 
-    let padding_length = serialized_header.len() % 64;
+        let padding_length = serialized_header_length % 64;
 
-    serialized_header.resize(serialized_header_length + padding_length, 0);
+        serialized_header.resize(serialized_header_length + padding_length, 0);
 
-    format!("{:0>64x}{}{:0>64x}{:0<64}", 0x40, hex::encode(header.transactions_hash), serialized_header_length, hex::encode(serialized_header))
-}
+        format!(
+            "{:0>64x}{}{:0>64x}{:0<64}",
+            0x40,
+            hex::encode(header.transactions_hash),
+            serialized_header_length,
+            hex::encode(serialized_header)
+        )
+    }
+
+    fn extract_block_height_differential(block_height:u64, modifier: u128) -> String {
+        let mut header = random_header(modifier);
+        header.height = BlockHeight(block_height);
+
+        let mut serialized_header = stdcode::serialize(&header)
+            .expect(ERR_STRING);
+
+        hex::encode(serialized_header)
+    }
 
 fn main() {
     let args = Args::parse();
@@ -208,6 +288,18 @@ fn main() {
         let serialized_header_and_root = extract_merkle_root_differential(modifier);
 
         print!("0x{}", serialized_header_and_root);
+    } else if args.extract_block_height.len() > 0 {
+        let block_height: u64 = args.extract_block_height
+            .parse()
+            .expect(ERR_STRING);
+        
+        let modifier: u128 = args.modifier
+            .parse()
+            .expect(ERR_STRING);
+
+        let serialized_header = extract_block_height_differential(block_height, modifier);
+
+        print!("0x{}", serialized_header);
     } else {
         print!("0x");
     }
