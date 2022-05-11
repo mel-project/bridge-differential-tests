@@ -76,13 +76,13 @@ fn decode_integer_differential(integer: u128) -> String {
     hex::encode(encoded_integer)
 }
 
-fn integer_size_differential(integer: u128) -> (String, String) {
+fn integer_size_differential(integer: u128) -> String {
     let encoded_integer = stdcode::serialize(&integer)
         .expect(ERR_STRING);
 
     let encoded_integer_length = encoded_integer.len() as u128;
 
-    (hex::encode(encoded_integer), format!("{:x}", encoded_integer_length))
+    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_length, encoded_integer_length, hex::encode(encoded_integer))
 }
 
 fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
@@ -133,9 +133,9 @@ fn main() {
         let integer: u128 = args.integer_size.parse()
             .expect(ERR_STRING);
     
-        let encoded_integer_and_size = integer_size_differential(integer);
+        let abi_encoded_integer_and_size = integer_size_differential(integer);
 
-        print!("0x{:0>64}{:0>64}", encoded_integer_and_size.0, encoded_integer_and_size.1);
+        print!("0x{}", abi_encoded_integer_and_size);
     } else {
         print!("0x");
     }
