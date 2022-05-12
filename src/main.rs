@@ -59,57 +59,13 @@ struct Args {
     extract_block_height: String,
 
     #[clap(long, default_value = "")]
-    modifier: String
-}
+    modifier: String,
 
-fn blake3_differential(data: &[u8]) -> String {
-    let hash = *blake3::keyed_hash(
-        blake3::hash(NODE_HASH_KEY).as_bytes(),
-        data
-    ).as_bytes();
+    #[clap(long, default_value = "")]
+    extract_value_and_recipient: String,
 
-    hex::encode(hash)
-}
-
-fn ed25519_differential(data: &[u8]) -> String {
-    let keypair = KeyPair::from_seed(Seed::default());
-
-    let signature = keypair.sk.sign(data, Some(Noise::generate()));
-
-    format!("{}{}", hex::encode(*keypair.pk), hex::encode(*signature))
-}
-
-fn decode_integer_differential(integer: u128) -> String {
-    let encoded_integer = stdcode::serialize(&integer)
-        .expect(ERR_STRING);
-
-    hex::encode(encoded_integer)
-}
-
-fn integer_size_differential(integer: u128) -> String {
-    let encoded_integer = stdcode::serialize(&integer)
-        .expect(ERR_STRING);
-
-    let encoded_integer_length = encoded_integer.len() as u128;
-
-    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_length, encoded_integer_length, hex::encode(encoded_integer))
-}
-
-fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
-    if start < end {
-        let start = start as usize;
-        let end = end as usize;
-
-        hex::encode(&data[start..end])
-    } else {
-        let r_start = (end + 1) as usize;
-        let r_end = (start + 1) as usize;
-    
-        let mut reverse_slice = data[r_start..r_end].to_vec();
-        reverse_slice.reverse();
-
-        hex::encode(reverse_slice)
-    }
+    #[clap(long, default_value = "")]
+    recipient: String,
 }
 
 fn random_header(modifier: u128) -> Header {
@@ -214,6 +170,150 @@ fn random_header(modifier: u128) -> Header {
     }
 }
 
+fn random_coin_id() -> CoinID {
+    CoinID {
+        txhash: TxHash(HashVal::random()),
+        index: rand::thread_rng().gen(),
+    }
+}
+
+fn random_coin_data() -> CoinData {
+    let additional_data_size: u32 = rand::thread_rng().gen_range(0..32);
+    let additional_data_range = 0..additional_data_size;
+    let additional_data: Vec<u8> = additional_data_range
+        .map(|_| {
+            rand::thread_rng().gen::<u8>()
+        })
+        .collect();
+
+    CoinData {
+        covhash: Address(HashVal::random()),
+        value: CoinValue(rand::thread_rng().gen()),
+        denom: Denom::Mel,
+        additional_data
+    }
+}
+
+fn random_transaction() -> Transaction {
+    let limit: u32 = 32;
+
+    let num_inputs: u32 = rand::thread_rng().gen_range(1..limit);
+    let inputs_range = 0..num_inputs;
+
+    let inputs = inputs_range
+        .into_iter()
+        .map(|_| {
+            random_coin_id()
+        })
+        .collect();
+
+    let num_outputs: u32 = rand::thread_rng().gen_range(1..limit);
+    let outputs_range = 0..num_outputs;
+
+    let outputs = outputs_range
+        .into_iter()
+        .map(|_| {
+            random_coin_data()
+        })
+        .collect();
+
+    let num_covenants: u32 = rand::thread_rng().gen_range(1..limit);
+    let convenants_range = 0..num_covenants;
+    let covenants = convenants_range
+        .into_iter()
+        .map(|_| {
+            let size = rand::thread_rng().gen_range(0..limit);
+            let range = 0..size;
+            let covenant = range
+                .into_iter()
+                .map(|_| {
+                    rand::thread_rng().gen::<u8>()
+                })
+                .collect();
+
+            covenant
+        })
+        .collect();
+
+    let num_sigs: u32 = rand::thread_rng().gen_range(1..limit);
+    let sigs_range = 0..num_sigs;
+    let sigs = sigs_range
+        .into_iter()
+        .map(|_| {
+            let size = rand::thread_rng().gen_range(0..limit);
+            let range = 0..size;
+            let sig = range
+                .into_iter()
+                .map(|_| {
+                    rand::thread_rng().gen::<u8>()
+                })
+                .collect();
+
+            sig
+        })
+        .collect();
+
+    Transaction {
+        kind: TxKind::Swap,
+        inputs,
+        outputs,
+        fee: CoinValue(rand::thread_rng().gen()),
+        covenants,
+        data: (0..2).map(|_| { rand::thread_rng().gen::<u8>() }).collect(),
+        sigs,
+    }
+}
+
+fn blake3_differential(data: &[u8]) -> String {
+    let hash = *blake3::keyed_hash(
+        blake3::hash(NODE_HASH_KEY).as_bytes(),
+        data
+    ).as_bytes();
+
+    hex::encode(hash)
+}
+
+fn ed25519_differential(data: &[u8]) -> String {
+    let keypair = KeyPair::from_seed(Seed::default());
+
+    let signature = keypair.sk.sign(data, Some(Noise::generate()));
+
+    format!("{}{}", hex::encode(*keypair.pk), hex::encode(*signature))
+}
+
+fn decode_integer_differential(integer: u128) -> String {
+    let encoded_integer = stdcode::serialize(&integer)
+        .expect(ERR_STRING);
+
+    hex::encode(encoded_integer)
+}
+
+fn integer_size_differential(integer: u128) -> String {
+    let encoded_integer = stdcode::serialize(&integer)
+        .expect(ERR_STRING);
+
+    let encoded_integer_length = encoded_integer.len() as u128;
+
+    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_length, encoded_integer_length, hex::encode(encoded_integer))
+}
+
+fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
+    if start < end {
+        let start = start as usize;
+        let end = end as usize;
+
+        hex::encode(&data[start..end])
+    } else {
+        let r_start = (end + 1) as usize;
+        let r_end = (start + 1) as usize;
+    
+        let mut reverse_slice = data[r_start..r_end].to_vec();
+        reverse_slice.reverse();
+
+        hex::encode(reverse_slice)
+    }
+}
+
     fn extract_merkle_root_differential(modifier: u128) -> String {
         let header = random_header(modifier);
             
@@ -243,6 +343,23 @@ fn random_header(modifier: u128) -> Header {
             .expect(ERR_STRING);
 
         hex::encode(serialized_header)
+    }
+
+    fn extract_value_and_recipient_differential(
+        value: u128,
+        recipient: String,
+    ) -> String {
+        let mut transaction = random_transaction();
+
+        transaction.outputs[0].value = CoinValue(value);
+
+        transaction.outputs[0].additional_data = hex::decode(recipient)
+            .expect(ERR_STRING);
+        
+        let serialized_transaction = stdcode::serialize(&transaction)
+            .expect(ERR_STRING);
+
+        hex::encode(serialized_transaction)
     }
 
 fn main() {
@@ -300,6 +417,17 @@ fn main() {
         let serialized_header = extract_block_height_differential(block_height, modifier);
 
         print!("0x{}", serialized_header);
+    } else if args.extract_value_and_recipient.len() > 0 {
+        let value: u128 = args.extract_value_and_recipient
+            .parse()
+            .expect(ERR_STRING);
+
+        let recipient = args.recipient.strip_prefix("0x")
+            .expect(ERR_STRING);
+
+        let serialized_transaction = extract_value_and_recipient_differential(value, recipient.to_string());
+
+        print!("0x{}", serialized_transaction);
     } else {
         print!("0x");
     }
