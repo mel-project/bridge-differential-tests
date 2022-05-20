@@ -8,6 +8,7 @@ use blake3;
 use clap::Parser;
 use ed25519_compact::{KeyPair, Signature, Seed, Noise};
 use rand::Rng;
+use rs_merkle::{MerkleTree, MerkleProof, Hasher};
 use themelio_structs::{
     Address,
     BlockHeight,
@@ -17,11 +18,12 @@ use themelio_structs::{
     Header,
     NetID,
     CoinValue,
+    StakeDoc,
     Transaction,
     TxKind,
     TxHash
 };
-use tmelcrypt::HashVal;
+use tmelcrypt::{ed25519_keygen, Ed25519PK, Ed25519SK, HashVal};
 
 const DATA_BLOCK_HASH_KEY: &[u8; 13] = b"smt_datablock";
 const NODE_HASH_KEY: &[u8; 8] = b"smt_node";
@@ -66,6 +68,20 @@ struct Args {
 
     #[clap(long, default_value = "")]
     recipient: String,
+
+    #[clap(long, default_value = "")]
+    build_tree: String,
+}
+
+#[derive(Clone)]
+struct Blake3Algorithm {}
+
+impl Hasher for Blake3Algorithm {
+    type Hash = [u8; 32];
+
+    fn hash(data: &[u8]) -> [u8; 32] {
+        *blake3::keyed_hash(blake3::hash(NODE_HASH_KEY).as_bytes(), data).as_bytes()
+    }
 }
 
 fn random_header(modifier: u128) -> Header {
@@ -264,6 +280,38 @@ fn random_transaction() -> Transaction {
     }
 }
 
+fn random_stakedoc() -> StakeDoc {
+    StakeDoc {
+        pubkey: ed25519_keygen().0,
+        e_start: rand::thread_rng().gen(),
+        e_post_end: rand::thread_rng().gen(),
+        syms_staked: CoinValue(rand::thread_rng().gen::<u128>()),
+    }
+}
+
+fn create_datablocks(num: u32) -> Vec<StakeDoc> {
+    let range = 0..num;
+
+    range
+        .into_iter()
+        .map(|_| {
+            random_stakedoc()
+        })
+        .collect::<Vec<StakeDoc>>()
+}
+
+fn as_leaves(datablocks: Vec<StakeDoc>) -> Vec<[u8; 32]> {
+    datablocks
+        .iter()
+        .map(|datablock| {
+            *blake3::keyed_hash(
+                blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+                &stdcode::serialize(datablock).unwrap()
+            ).as_bytes()
+        })
+        .collect()
+}
+
 fn blake3_differential(data: &[u8]) -> String {
     let hash = *blake3::keyed_hash(
         blake3::hash(NODE_HASH_KEY).as_bytes(),
@@ -339,7 +387,7 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
         let mut header = random_header(modifier);
         header.height = BlockHeight(block_height);
 
-        let mut serialized_header = stdcode::serialize(&header)
+        let serialized_header = stdcode::serialize(&header)
             .expect(ERR_STRING);
 
         hex::encode(serialized_header)
@@ -360,6 +408,37 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
             .expect(ERR_STRING);
 
         hex::encode(serialized_transaction)
+    }
+
+    fn build_tree_differential(num_leaves: u32) -> String {
+        let datablocks = create_datablocks(num_leaves);
+
+        let leaves = as_leaves(datablocks.clone());
+
+        let tree = MerkleTree::<Blake3Algorithm>::from_leaves(&leaves);
+
+        let serialized_datablocks: Vec<String> = datablocks
+            .into_iter()
+            .map(|datablock| {
+                let mut serialized_datablock = stdcode::serialize(&datablock).unwrap();
+                let serialized_datablock_len = serialized_datablock.len();
+                let padding_length = serialized_datablock.len() % 64;
+
+                serialized_datablock.resize(
+                    serialized_datablock_len + padding_length,
+                    0
+                );
+
+                format!("{:0>64}{}", serialized_datablock_len, hex::encode(serialized_datablock))
+            })
+            .collect();
+
+        let mut concatenated_datablock = String::new();
+        for i in 0..serialized_datablocks.len() {
+            concatenated_datablock += &serialized_datablocks[i];
+        }
+
+        format!("{} {}", concatenated_datablock, tree.root_hex().unwrap())
     }
 
 fn main() {
@@ -428,6 +507,14 @@ fn main() {
         let serialized_transaction = extract_value_and_recipient_differential(value, recipient.to_string());
 
         print!("0x{}", serialized_transaction);
+    } else if args.build_tree.len() > 0 {
+        let num_leaves: u32 = args.build_tree
+            .parse()
+            .expect(ERR_STRING);
+        let num_leaves = num_leaves % 16;
+
+        let datablocks_and_root = build_tree_differential(num_leaves);
+        print!("{}", datablocks_and_root);
     } else {
         print!("0x");
     }
