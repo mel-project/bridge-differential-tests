@@ -362,7 +362,7 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
     }
 }
 
-    fn extract_merkle_root_differential(modifier: u128) -> String {
+    fn extract_transactions_hash_differential(modifier: u128) -> String {
         let header = random_header(modifier);
             
         let mut serialized_header = stdcode::serialize(&header)
@@ -481,7 +481,7 @@ fn main() {
             .parse()
             .expect(ERR_STRING);
 
-        let serialized_header_and_root = extract_merkle_root_differential(modifier);
+        let serialized_header_and_root = extract_transactions_hash_differential(modifier);
 
         print!("0x{}", serialized_header_and_root);
     } else if args.extract_block_height.len() > 0 {
