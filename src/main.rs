@@ -21,7 +21,7 @@ use themelio_structs::{
     StakeDoc,
     Transaction,
     TxKind,
-    TxHash
+    TxHash,
 };
 use tmelcrypt::{ed25519_keygen, Ed25519PK, Ed25519SK, HashVal};
 
@@ -55,7 +55,7 @@ struct Args {
     slice: String,
 
     #[clap(long, default_value = "")]
-    extract_merkle_root: String,
+    extract_transactions_hash: String,
 
     #[clap(long, default_value = "")]
     extract_block_height: String,
@@ -476,8 +476,8 @@ fn main() {
             .expect(ERR_STRING);
 
         print!("0x{}", slice_differential(&data, args.start, args.end));
-    } else if args.extract_merkle_root.len() > 0 {
-        let modifier: u128 = args.extract_merkle_root
+    } else if args.extract_transactions_hash.len() > 0 {
+        let modifier: u128 = args.extract_transactions_hash
             .parse()
             .expect(ERR_STRING);
 
