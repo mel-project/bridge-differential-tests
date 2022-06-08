@@ -1,14 +1,8 @@
-use std::convert::TryFrom;
-use std::fmt::LowerHex;
-use std::{env, io};
-use std::ops::{Range, Deref};
-use std::sync::Arc;
-
 use blake3;
 use clap::Parser;
-use ed25519_compact::{KeyPair, Signature, Seed, Noise};
+use ed25519_compact::{KeyPair, Seed, Noise};
 use rand::Rng;
-use rs_merkle::{MerkleTree, MerkleProof, Hasher};
+use rs_merkle::{MerkleTree, Hasher};
 use themelio_structs::{
     Address,
     BlockHeight,
@@ -23,7 +17,7 @@ use themelio_structs::{
     TxKind,
     TxHash,
 };
-use tmelcrypt::{ed25519_keygen, Ed25519PK, Ed25519SK, HashVal};
+use tmelcrypt::{ed25519_keygen, HashVal};
 
 const DATA_BLOCK_HASH_KEY: &[u8; 13] = b"smt_datablock";
 const NODE_HASH_KEY: &[u8; 8] = b"smt_node";
@@ -71,6 +65,9 @@ struct Args {
 
     #[clap(long, default_value = "")]
     build_tree: String,
+
+    #[clap(long)]
+    big_hash: bool,
 }
 
 #[derive(Clone)]
@@ -441,6 +438,29 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
         format!("{} {}", concatenated_datablock, tree.root_hex().unwrap())
     }
 
+    fn big_hash() -> String {
+        let mut stakedocs = vec![];
+        let range = 0..800;
+
+        for _ in range {
+            stakedocs.append(&mut stdcode::serialize(&random_stakedoc()).unwrap())
+        }
+
+        let stakedocs_length = stakedocs.len();
+        let padding_length = stakedocs_length % 64;
+        stakedocs.resize(stakedocs_length + padding_length, 0);
+
+        let stakedocs = hex::encode(stakedocs);
+
+        let big_hash = *blake3::keyed_hash(
+            blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+            stakedocs.as_bytes(),
+        ).as_bytes();
+        let big_hash = hex::encode(big_hash);
+
+        format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakedocs.len() / 2, stakedocs)
+    }
+
 fn main() {
     let args = Args::parse();
 
@@ -515,6 +535,8 @@ fn main() {
 
         let datablocks_and_root = build_tree_differential(num_leaves);
         print!("{}", datablocks_and_root);
+    } else if args.big_hash == true {
+        print!("0x{}", big_hash());
     } else {
         print!("0x");
     }
