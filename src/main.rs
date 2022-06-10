@@ -440,23 +440,23 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
 
     fn big_hash() -> String {
         let mut stakedocs = vec![];
-        let range = 0..800;
+        let range = 0..50;
 
         for _ in range {
             stakedocs.append(&mut stdcode::serialize(&random_stakedoc()).unwrap())
         }
 
         let stakedocs_length = stakedocs.len();
-        let padding_length = stakedocs_length % 64;
+        let padding_length = 64 - stakedocs_length % 64;
         stakedocs.resize(stakedocs_length + padding_length, 0);
-
-        let stakedocs = hex::encode(stakedocs);
 
         let big_hash = *blake3::keyed_hash(
             blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-            stakedocs.as_bytes(),
+            &stakedocs,
         ).as_bytes();
         let big_hash = hex::encode(big_hash);
+        let stakedocs = hex::encode(stakedocs);
+
 
         format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakedocs.len() / 2, stakedocs)
     }
