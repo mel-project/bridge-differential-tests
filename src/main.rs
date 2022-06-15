@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use blake3;
 use clap::Parser;
 use ed25519_compact::{KeyPair, Seed, Noise};
@@ -58,7 +60,13 @@ struct Args {
     modifier: String,
 
     #[clap(long, default_value = "")]
-    extract_value_and_recipient: String,
+    extract_value: String,
+
+    #[clap(long, default_value = "")]
+    denom: String,
+
+    #[clap(long, default_value = "")]
+    tx_hash: String,
 
     #[clap(long, default_value = "")]
     recipient: String,
@@ -190,7 +198,7 @@ fn random_coin_id() -> CoinID {
     }
 }
 
-fn random_coin_data() -> CoinData {
+fn random_coindata() -> CoinData {
     let additional_data_size: u32 = rand::thread_rng().gen_range(0..32);
     let additional_data_range = 0..additional_data_size;
     let additional_data: Vec<u8> = additional_data_range
@@ -226,7 +234,7 @@ fn random_transaction() -> Transaction {
     let outputs = outputs_range
         .into_iter()
         .map(|_| {
-            random_coin_data()
+            random_coindata()
         })
         .collect();
 
@@ -390,13 +398,16 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
         hex::encode(serialized_header)
     }
 
-    fn extract_value_and_recipient_differential(
+    fn extract_value_denom_recipient_differential(
         value: u128,
+        denom: Denom,
         recipient: String,
     ) -> String {
         let mut transaction = random_transaction();
 
         transaction.outputs[0].value = CoinValue(value);
+
+        transaction.outputs[0].denom = denom;
 
         transaction.outputs[0].additional_data = hex::decode(recipient)
             .expect(ERR_STRING);
@@ -516,15 +527,19 @@ fn main() {
         let serialized_header = extract_block_height_differential(block_height, modifier);
 
         print!("0x{}", serialized_header);
-    } else if args.extract_value_and_recipient.len() > 0 {
-        let value: u128 = args.extract_value_and_recipient
+    } else if args.extract_value.len() > 0 {
+        let value: u128 = args.extract_value
             .parse()
             .expect(ERR_STRING);
 
-        let recipient = args.recipient.strip_prefix("0x")
+        let denom = Denom::from_str(&args.denom)
             .expect(ERR_STRING);
 
-        let serialized_transaction = extract_value_and_recipient_differential(value, recipient.to_string());
+        let recipient = args.recipient
+            .strip_prefix("0x")
+            .expect(ERR_STRING);
+
+        let serialized_transaction = extract_value_denom_recipient_differential(value, denom, recipient.to_string());
 
         print!("0x{}", serialized_transaction);
     } else if args.build_tree.len() > 0 {
