@@ -19,7 +19,9 @@ use themelio_structs::{
     TxKind,
     TxHash,
 };
-use tmelcrypt::{ed25519_keygen, HashVal};
+use tmelcrypt::{ed25519_keygen, HashVal, Ed25519PK};
+
+const STAKE_EPOCH: u64 = 2_000_000;
 
 const DATA_BLOCK_HASH_KEY: &[u8; 13] = b"smt_datablock";
 const NODE_HASH_KEY: &[u8; 8] = b"smt_node";
@@ -76,6 +78,9 @@ struct Args {
 
     #[clap(long)]
     big_hash: bool,
+
+    #[clap(long, default_value = "")]
+    verify_header: String,
 }
 
 #[derive(Clone)]
@@ -285,12 +290,18 @@ fn random_transaction() -> Transaction {
     }
 }
 
-fn random_stakedoc() -> StakeDoc {
+fn random_stakedoc(epoch: u64) -> StakeDoc {
+    let e_start: u64 = rand::thread_rng()
+        .gen_range(epoch * STAKE_EPOCH..(epoch + 1) * STAKE_EPOCH);
+
+    let e_post_end: u64 = rand::thread_rng()
+        .gen_range((epoch + 1) * STAKE_EPOCH..u64::MAX);
+
     StakeDoc {
         pubkey: ed25519_keygen().0,
-        e_start: rand::thread_rng().gen(),
-        e_post_end: rand::thread_rng().gen(),
-        syms_staked: CoinValue(rand::thread_rng().gen::<u128>()),
+        e_start,
+        e_post_end,
+        syms_staked: CoinValue(rand::thread_rng().gen_range(0..u32::MAX as u128)),
     }
 }
 
@@ -300,7 +311,7 @@ fn create_datablocks(num: u32) -> Vec<StakeDoc> {
     range
         .into_iter()
         .map(|_| {
-            random_stakedoc()
+            random_stakedoc(rand::thread_rng().gen())
         })
         .collect::<Vec<StakeDoc>>()
 }
@@ -367,110 +378,254 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
     }
 }
 
-    fn extract_transactions_hash_differential(modifier: u128) -> String {
-        let header = random_header(modifier);
-            
-        let mut serialized_header = stdcode::serialize(&header)
+fn extract_transactions_hash_differential(modifier: u128) -> String {
+    let header = random_header(modifier);
+        
+    let mut serialized_header = stdcode::serialize(&header)
+    .expect(ERR_STRING);
+
+    let serialized_header_length = serialized_header.len();
+
+    let padding_length = serialized_header_length % 64;
+
+    serialized_header.resize(serialized_header_length + padding_length, 0);
+
+    format!(
+        "{:0>64x}{}{:0>64x}{:0<64}",
+        0x40,
+        hex::encode(header.transactions_hash),
+        serialized_header_length,
+        hex::encode(serialized_header)
+    )
+}
+
+fn extract_block_height_differential(block_height:u64, modifier: u128) -> String {
+    let mut header = random_header(modifier);
+    header.height = BlockHeight(block_height);
+
+    let serialized_header = stdcode::serialize(&header)
         .expect(ERR_STRING);
 
-        let serialized_header_length = serialized_header.len();
+    hex::encode(serialized_header)
+}
 
-        let padding_length = serialized_header_length % 64;
+fn extract_value_denom_recipient_differential(
+    value: u128,
+    denom: Denom,
+    recipient: String,
+) -> String {
+    let mut transaction = random_transaction();
 
-        serialized_header.resize(serialized_header_length + padding_length, 0);
+    transaction.outputs[0].value = CoinValue(value);
 
-        format!(
-            "{:0>64x}{}{:0>64x}{:0<64}",
-            0x40,
-            hex::encode(header.transactions_hash),
-            serialized_header_length,
-            hex::encode(serialized_header)
+    transaction.outputs[0].denom = denom;
+
+    transaction.outputs[0].additional_data = hex::decode(recipient)
+        .expect(ERR_STRING);
+    
+    let serialized_transaction = stdcode::serialize(&transaction)
+        .expect(ERR_STRING);
+
+    hex::encode(serialized_transaction)
+}
+
+fn build_tree_differential(num_leaves: u32) -> String {
+    let datablocks = create_datablocks(num_leaves);
+
+    let leaves = as_leaves(datablocks.clone());
+
+    let tree = MerkleTree::<Blake3Algorithm>::from_leaves(&leaves);
+
+    let serialized_datablocks: Vec<String> = datablocks
+        .into_iter()
+        .map(|datablock| {
+            let mut serialized_datablock = stdcode::serialize(&datablock).unwrap();
+            let serialized_datablock_len = serialized_datablock.len();
+            let padding_length = serialized_datablock.len() % 64;
+
+            serialized_datablock.resize(
+                serialized_datablock_len + padding_length,
+                0
+            );
+
+            format!("{:0>64}{}", serialized_datablock_len, hex::encode(serialized_datablock))
+        })
+        .collect();
+
+    let mut concatenated_datablock = String::new();
+    for i in 0..serialized_datablocks.len() {
+        concatenated_datablock += &serialized_datablocks[i];
+    }
+
+    format!("{} {}", concatenated_datablock, tree.root_hex().unwrap())
+}
+
+fn big_hash_differential() -> String {
+    let mut stakedocs = vec![];
+    let range = 0..50;
+
+    for _ in range {
+        stakedocs.append(
+            &mut stdcode::serialize(
+                &random_stakedoc(rand::thread_rng().gen())
+            ).unwrap()
         )
     }
 
-    fn extract_block_height_differential(block_height:u64, modifier: u128) -> String {
-        let mut header = random_header(modifier);
-        header.height = BlockHeight(block_height);
+    let stakedocs_length = stakedocs.len();
+    let padding_length = 64 - stakedocs_length % 64;
+    stakedocs.resize(stakedocs_length + padding_length, 0);
 
-        let serialized_header = stdcode::serialize(&header)
-            .expect(ERR_STRING);
+    let big_hash = *blake3::keyed_hash(
+        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+        &stakedocs,
+    ).as_bytes();
+    let big_hash = hex::encode(big_hash);
+    let stakedocs = hex::encode(stakedocs);
 
-        hex::encode(serialized_header)
+
+    format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakedocs.len() / 2, stakedocs)
+}
+
+fn verify_header_differential(num_stakedocs: u32) -> String {
+    let epoch: u64 = rand::thread_rng().gen_range(0..u32::MAX.into());
+    let modifier: u128 = rand::thread_rng().gen();
+
+    let mut verifier = random_header(modifier);
+
+    let mut new_height = epoch * STAKE_EPOCH;
+    new_height += verifier.height.0 % STAKE_EPOCH;
+    verifier.height = BlockHeight(new_height);
+
+    let modifier: u128 = rand::thread_rng().gen();
+    let mut header = random_header(modifier);
+    header.height = verifier.height + BlockHeight(1);
+
+    let mut header = stdcode::serialize(&header).unwrap();
+    let header_length = header.len();
+    let header_padding_length =
+        if header_length % 64 == 0 {
+            0
+        } else {
+            64 - header_length % 64
+        };
+
+    header.resize(header_length + header_padding_length, 0);
+
+    let mut epoch_syms = CoinValue(0);
+    let mut stakedocs = String::new();
+    let mut signatures: Vec<Vec<u8>> = vec![];
+
+    for _ in 0..num_stakedocs {
+        let mut stakedoc = random_stakedoc(epoch);
+        let keypair = ed25519_keygen();
+        stakedoc.pubkey = Ed25519PK::from_bytes(&keypair.0.0).unwrap();
+
+        let signature = keypair.1.sign(&header);
+        signatures.push(signature);
+
+        epoch_syms += stakedoc.syms_staked;
+
+        let stakedoc = hex::encode(
+            stdcode::serialize(&stakedoc).unwrap()
+        );
+        stakedocs += &stakedoc;
     }
 
-    fn extract_value_denom_recipient_differential(
-        value: u128,
-        denom: Denom,
-        recipient: String,
-    ) -> String {
-        let mut transaction = random_transaction();
+    let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
 
-        transaction.outputs[0].value = CoinValue(value);
+    let signatures_length = signatures.len();
 
-        transaction.outputs[0].denom = denom;
-
-        transaction.outputs[0].additional_data = hex::decode(recipient)
-            .expect(ERR_STRING);
-        
-        let serialized_transaction = stdcode::serialize(&transaction)
-            .expect(ERR_STRING);
-
-        hex::encode(serialized_transaction)
+    let mut signatures_str = String::new();
+    for i in 0..signatures_length {
+        signatures_str += &hex::encode(&signatures[i]);
     }
 
-    fn build_tree_differential(num_leaves: u32) -> String {
-        let datablocks = create_datablocks(num_leaves);
+    stakedocs.insert_str(0, &epoch_syms);
+    let stakedocs_length = stakedocs.len();
 
-        let leaves = as_leaves(datablocks.clone());
+    let stakedocs_padding_length = 
+        if stakedocs_length % 64 == 0 {
+            0
+        } else {
+            64 - stakedocs_length % 64
+        };
 
-        let tree = MerkleTree::<Blake3Algorithm>::from_leaves(&leaves);
+    stakedocs = format!(
+        "{:0<width$}",
+        stakedocs,
+        width = stakedocs_length + stakedocs_padding_length
+    );
 
-        let serialized_datablocks: Vec<String> = datablocks
-            .into_iter()
-            .map(|datablock| {
-                let mut serialized_datablock = stdcode::serialize(&datablock).unwrap();
-                let serialized_datablock_len = serialized_datablock.len();
-                let padding_length = serialized_datablock.len() % 64;
+    let stakes_hash = blake3::keyed_hash(
+        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+        stakedocs.as_bytes()
+    );
+    let stakes_hash = hex::encode(stakes_hash.as_bytes());
 
-                serialized_datablock.resize(
-                    serialized_datablock_len + padding_length,
-                    0
-                );
+    let header = hex::encode(header);
 
-                format!("{:0>64}{}", serialized_datablock_len, hex::encode(serialized_datablock))
-            })
-            .collect();
+    // return abi encoded: verifier's block height, verifier's stakes hash, header bytes,
+    // StakeDocs array, and signatures array.
+    format!(
+        "{:0>64x}{}{:0>64x}{:0>64x}{:0>64x}{:0>64x}{}{:0>64x}{}{:0>64x}{}",
+        verifier.height.0,
+        stakes_hash,
+        0xa0,
+        0xe0,
+        0x120,
+        header_length,
+        header,
+        stakedocs_length / 2,
+        stakedocs,
+        signatures_length * 2,
+        signatures_str
+    )
+}
 
-        let mut concatenated_datablock = String::new();
-        for i in 0..serialized_datablocks.len() {
-            concatenated_datablock += &serialized_datablocks[i];
-        }
+// 000000000000000000000000000000000000000000000000001d97bdb317cd98
+// 5aa4249ea50d5ef8b3f55f2836ec827362eba8ea2e7bf9f59326ec457d790dca
 
-        format!("{} {}", concatenated_datablock, tree.root_hex().unwrap())
-    }
+// 00000000000000000000000000000000000000000000000000000000000000a0
+// 00000000000000000000000000000000000000000000000000000000000000e0
+// 0000000000000000000000000000000000000000000000000000000000000120
 
-    fn big_hash() -> String {
-        let mut stakedocs = vec![];
-        let range = 0..50;
+// 00000000000000000000000000000000000000000000000000000000000000fd
+// ff077b13be79a1811ec6143f5eea1d0e148dd67d4c0e210ae50d43a18d532a7f
+// 17fd99cd17b3bd971d0026fbc53bfcd09a3efe5ea122443bdf325738b311728d
+// d83b1e91968a3b769c21853c5f050b82fd377989dd7af39fdba23921495bc0f9
+// f201eabf3edb9f4d779dd7577b1d337729bea5eb39d68a147780628b7e65b361
+// 89e089f999b298fe668afe8479c1d993b483b37fd51a8cffd4146dfe61352bed
+// 90705c56561a02e3b39d1c55fee376ede24be2cf8bb6955414fb7d4e9981bc43
+// ecf594610ccdd4735dd5740ac5bc0c2242bed102b745a48496763ad7b5dc07c6
+// c753fcd5c98b35ab833cf09f20a4ada66b0dbf3b206796e337ed83e09b000000
 
-        for _ in range {
-            stakedocs.append(&mut stdcode::serialize(&random_stakedoc()).unwrap())
-        }
+// 000000000000000000000000000000000000000000000000000000000000003c
+// fc4d2dd0e33d26d71bf1e08bd3f4dda4aa6a4f7645abe18861173328982fde0c
+// 317ee5489efdc12d12b3bd971d00fd4e6278412cf45e80fc4d2dd0e300000000
 
-        let stakedocs_length = stakedocs.len();
-        let padding_length = 64 - stakedocs_length % 64;
-        stakedocs.resize(stakedocs_length + padding_length, 0);
+// 0000000000000000000000000000000000000000000000000000000000000002
+// 6d0a44d0a87d61cb058c4e6942cc81b481b9f18a533c1ff9760a8f1a1e0f17d5
+// c872fba21c1dbddbe2ecb63160e20cc1b53ada070a450d017fdc5d83b7983c0b
 
-        let big_hash = *blake3::keyed_hash(
-            blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-            &stakedocs,
-        ).as_bytes();
-        let big_hash = hex::encode(big_hash);
-        let stakedocs = hex::encode(stakedocs);
+//
 
+// 0000000000000000000000000000000000000000000000000000000000000000
+// 0000000000000000000000000000000000000000000000000000000000000001
 
-        format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakedocs.len() / 2, stakedocs)
-    }
+// 00000000000000000000000000000000000000000000000000000000000000a0
+// 00000000000000000000000000000000000000000000000000000000000000e0
+// 0000000000000000000000000000000000000000000000000000000000000120
+
+// 0000000000000000000000000000000000000000000000000000000000000020
+// 0000000000000000000000000000000000000000000000000000000000000002
+
+// 0000000000000000000000000000000000000000000000000000000000000020
+// 0000000000000000000000000000000000000000000000000000000000000003
+
+// 0000000000000000000000000000000000000000000000000000000000000002
+// 0000000000000000000000000000000000000000000000000000000000000004
+// 0000000000000000000000000000000000000000000000000000000000000005
 
 fn main() {
     let args = Args::parse();
@@ -551,7 +706,13 @@ fn main() {
         let datablocks_and_root = build_tree_differential(num_leaves);
         print!("{}", datablocks_and_root);
     } else if args.big_hash == true {
-        print!("0x{}", big_hash());
+        print!("0x{}", big_hash_differential());
+    } else if args.verify_header.len() > 0 {
+        let num_stakedocs: u32 = args.verify_header
+            .parse()
+            .expect(ERR_STRING);
+
+        print!("0x{}", verify_header_differential(num_stakedocs));
     } else {
         print!("0x");
     }
