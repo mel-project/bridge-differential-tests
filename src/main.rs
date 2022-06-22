@@ -292,10 +292,10 @@ fn random_transaction() -> Transaction {
 
 fn random_stakedoc(epoch: u64) -> StakeDoc {
     let e_start: u64 = rand::thread_rng()
-        .gen_range(epoch * STAKE_EPOCH..(epoch + 1) * STAKE_EPOCH);
+        .gen_range(0..epoch);
 
     let e_post_end: u64 = rand::thread_rng()
-        .gen_range((epoch + 1) * STAKE_EPOCH..u64::MAX);
+        .gen_range(epoch + 1..u64::MAX);
 
     StakeDoc {
         pubkey: ed25519_keygen().0,
@@ -386,7 +386,11 @@ fn extract_transactions_hash_differential(modifier: u128) -> String {
 
     let serialized_header_length = serialized_header.len();
 
-    let padding_length = serialized_header_length % 64;
+    let padding_length = if serialized_header_length % 64 == 0 {
+        0
+    } else {
+        64 - serialized_header_length % 64
+    };
 
     serialized_header.resize(serialized_header_length + padding_length, 0);
 
@@ -441,7 +445,11 @@ fn build_tree_differential(num_leaves: u32) -> String {
         .map(|datablock| {
             let mut serialized_datablock = stdcode::serialize(&datablock).unwrap();
             let serialized_datablock_len = serialized_datablock.len();
-            let padding_length = serialized_datablock.len() % 64;
+            let padding_length = if serialized_datablock.len() % 64 == 0 {
+                0
+            } else {
+                64 - serialized_datablock.len() % 64
+            };
 
             serialized_datablock.resize(
                 serialized_datablock_len + padding_length,
@@ -473,7 +481,13 @@ fn big_hash_differential() -> String {
     }
 
     let stakedocs_length = stakedocs.len();
-    let padding_length = 64 - stakedocs_length % 64;
+
+    let padding_length = if stakedocs_length % 64 == 0 {
+        0
+    } else {
+        64 - stakedocs_length % 64
+    };
+
     stakedocs.resize(stakedocs_length + padding_length, 0);
 
     let big_hash = *blake3::keyed_hash(
@@ -493,7 +507,7 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
 
     let mut verifier = random_header(modifier);
 
-    let mut new_height = epoch * STAKE_EPOCH;
+    let mut new_height = (epoch - 1) * STAKE_EPOCH;
     new_height += verifier.height.0 % STAKE_EPOCH;
     verifier.height = BlockHeight(new_height);
 
@@ -502,15 +516,6 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     header.height = verifier.height + BlockHeight(1);
 
     let mut header = stdcode::serialize(&header).unwrap();
-    let header_length = header.len();
-    let header_padding_length =
-        if header_length % 64 == 0 {
-            0
-        } else {
-            64 - header_length % 64
-        };
-
-    header.resize(header_length + header_padding_length, 0);
 
     let mut epoch_syms = CoinValue(0);
     let mut stakedocs = String::new();
@@ -532,7 +537,17 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         stakedocs += &stakedoc;
     }
 
-    let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
+    let header_length = header.len();
+    let header_padding_length = if header_length % 64 == 0 {
+        0
+    } else {
+        64 - header_length % 64
+    };
+
+    header.resize(header_length + header_padding_length, 0);
+
+    let header = hex::encode(header);
+
 
     let signatures_length = signatures.len();
 
@@ -541,29 +556,27 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         signatures_str += &hex::encode(&signatures[i]);
     }
 
+    let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
     stakedocs.insert_str(0, &epoch_syms);
-    let stakedocs_length = stakedocs.len();
 
-    let stakedocs_padding_length = 
-        if stakedocs_length % 64 == 0 {
-            0
-        } else {
-            64 - stakedocs_length % 64
-        };
+    let stakes_hash = blake3::keyed_hash(
+        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+        &hex::decode(&stakedocs).unwrap()
+    );
+    let stakes_hash = hex::encode(stakes_hash.as_bytes());
+
+    let stakedocs_length = stakedocs.len();
+    let stakedocs_padding_length = if stakedocs_length % 64 == 0 {
+        0
+    } else {
+        64 - stakedocs_length % 64
+    };
 
     stakedocs = format!(
         "{:0<width$}",
         stakedocs,
         width = stakedocs_length + stakedocs_padding_length
     );
-
-    let stakes_hash = blake3::keyed_hash(
-        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-        stakedocs.as_bytes()
-    );
-    let stakes_hash = hex::encode(stakes_hash.as_bytes());
-
-    let header = hex::encode(header);
 
     // return abi encoded: verifier's block height, verifier's stakes hash, header bytes,
     // StakeDocs array, and signatures array.
