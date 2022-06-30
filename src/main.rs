@@ -47,9 +47,6 @@ struct Args {
     end: isize,
 
     #[clap(long, default_value = "")]
-    integer_size: String,
-
-    #[clap(long, default_value = "")]
     slice: String,
 
     #[clap(long, default_value = "")]
@@ -349,13 +346,6 @@ fn decode_integer_differential(integer: u128) -> String {
     let encoded_integer = stdcode::serialize(&integer)
         .expect(ERR_STRING);
 
-    hex::encode(encoded_integer)
-}
-
-fn integer_size_differential(integer: u128) -> String {
-    let encoded_integer = stdcode::serialize(&integer)
-        .expect(ERR_STRING);
-
     let encoded_integer_length = encoded_integer.len() as u128;
 
     format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_length, encoded_integer_length, hex::encode(encoded_integer))
@@ -612,18 +602,11 @@ fn main() {
 
         print!("0x{}", key_and_signature);
     } else if args.decode_integer.len() > 0 {
-        let integer: u128 = args.decode_integer.parse()
-            .expect(ERR_STRING);
-
-        let encoded_integer = decode_integer_differential(integer);
-
-        print!("0x{}", encoded_integer);
-    } else if args.integer_size.len() > 0 {
-        let integer: u128 = args.integer_size
+        let integer: u128 = args.decode_integer
             .parse()
             .expect(ERR_STRING);
     
-        let abi_encoded_integer_and_size = integer_size_differential(integer);
+        let abi_encoded_integer_and_size = decode_integer_differential(integer);
 
         print!("0x{}", abi_encoded_integer_and_size);
     } else if args.slice.len() > 0 {
