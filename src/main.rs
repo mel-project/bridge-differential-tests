@@ -2,9 +2,12 @@ use std::str::FromStr;
 
 use blake3;
 use clap::Parser;
-use ed25519_compact::{KeyPair, Seed, Noise};
+use ed25519_compact::{
+    KeyPair,
+    Seed,
+    Noise
+};
 use rand::Rng;
-use rs_merkle::{MerkleTree, Hasher};
 use themelio_structs::{
     Address,
     BlockHeight,
@@ -19,7 +22,11 @@ use themelio_structs::{
     TxKind,
     TxHash,
 };
-use tmelcrypt::{ed25519_keygen, HashVal, Ed25519PK};
+use tmelcrypt::{
+    ed25519_keygen,
+    HashVal,
+    Ed25519PK
+};
 
 const STAKE_EPOCH: u64 = 2_000_000;
 
@@ -78,17 +85,6 @@ struct Args {
 
     #[clap(long, default_value = "")]
     verify_header: String,
-}
-
-#[derive(Clone)]
-struct Blake3Algorithm {}
-
-impl Hasher for Blake3Algorithm {
-    type Hash = [u8; 32];
-
-    fn hash(data: &[u8]) -> [u8; 32] {
-        *blake3::keyed_hash(blake3::hash(NODE_HASH_KEY).as_bytes(), data).as_bytes()
-    }
 }
 
 fn random_header(modifier: u128) -> Header {
@@ -221,9 +217,7 @@ fn random_transaction() -> Transaction {
     let limit: u32 = 32;
 
     let num_inputs: u32 = rand::thread_rng().gen_range(1..limit);
-    let inputs_range = 0..num_inputs;
-
-    let inputs = inputs_range
+    let inputs = (0..num_inputs)
         .into_iter()
         .map(|_| {
             random_coin_id()
@@ -231,9 +225,7 @@ fn random_transaction() -> Transaction {
         .collect();
 
     let num_outputs: u32 = rand::thread_rng().gen_range(1..limit);
-    let outputs_range = 0..num_outputs;
-
-    let outputs = outputs_range
+    let outputs = (0..num_outputs)
         .into_iter()
         .map(|_| {
             random_coindata()
@@ -241,8 +233,7 @@ fn random_transaction() -> Transaction {
         .collect();
 
     let num_covenants: u32 = rand::thread_rng().gen_range(1..limit);
-    let convenants_range = 0..num_covenants;
-    let covenants = convenants_range
+    let covenants = (0..num_covenants)
         .into_iter()
         .map(|_| {
             let size = rand::thread_rng().gen_range(0..limit);
@@ -259,8 +250,7 @@ fn random_transaction() -> Transaction {
         .collect();
 
     let num_sigs: u32 = rand::thread_rng().gen_range(1..limit);
-    let sigs_range = 0..num_sigs;
-    let sigs = sigs_range
+    let sigs = (0..num_sigs)
         .into_iter()
         .map(|_| {
             let size = rand::thread_rng().gen_range(0..limit);
@@ -300,29 +290,6 @@ fn random_stakedoc(epoch: u64) -> StakeDoc {
         e_post_end,
         syms_staked: CoinValue(rand::thread_rng().gen_range(0..u32::MAX as u128)),
     }
-}
-
-fn create_datablocks(num: u32) -> Vec<StakeDoc> {
-    let range = 0..num;
-
-    range
-        .into_iter()
-        .map(|_| {
-            random_stakedoc(rand::thread_rng().gen())
-        })
-        .collect::<Vec<StakeDoc>>()
-}
-
-fn as_leaves(datablocks: Vec<StakeDoc>) -> Vec<[u8; 32]> {
-    datablocks
-        .iter()
-        .map(|datablock| {
-            *blake3::keyed_hash(
-                blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-                &stdcode::serialize(datablock).unwrap()
-            ).as_bytes()
-        })
-        .collect()
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -421,41 +388,6 @@ fn extract_value_denom_recipient_differential(
         .expect(ERR_STRING);
 
     hex::encode(serialized_transaction)
-}
-
-fn build_tree_differential(num_leaves: u32) -> String {
-    let datablocks = create_datablocks(num_leaves);
-
-    let leaves = as_leaves(datablocks.clone());
-
-    let tree = MerkleTree::<Blake3Algorithm>::from_leaves(&leaves);
-
-    let serialized_datablocks: Vec<String> = datablocks
-        .into_iter()
-        .map(|datablock| {
-            let mut serialized_datablock = stdcode::serialize(&datablock).unwrap();
-            let serialized_datablock_len = serialized_datablock.len();
-            let padding_length = if serialized_datablock.len() % 64 == 0 {
-                0
-            } else {
-                64 - serialized_datablock.len() % 64
-            };
-
-            serialized_datablock.resize(
-                serialized_datablock_len + padding_length,
-                0
-            );
-
-            format!("{:0>64}{}", serialized_datablock_len, hex::encode(serialized_datablock))
-        })
-        .collect();
-
-    let mut concatenated_datablock = String::new();
-    for i in 0..serialized_datablocks.len() {
-        concatenated_datablock += &serialized_datablocks[i];
-    }
-
-    format!("{} {}", concatenated_datablock, tree.root_hex().unwrap())
 }
 
 fn big_hash_differential() -> String {
@@ -649,14 +581,6 @@ fn main() {
         let serialized_transaction = extract_value_denom_recipient_differential(value, denom, recipient.to_string());
 
         print!("0x{}", serialized_transaction);
-    } else if args.build_tree.len() > 0 {
-        let num_leaves: u32 = args.build_tree
-            .parse()
-            .expect(ERR_STRING);
-        let num_leaves = num_leaves % 16;
-
-        let datablocks_and_root = build_tree_differential(num_leaves);
-        print!("{}", datablocks_and_root);
     } else if args.big_hash == true {
         print!("0x{}", big_hash_differential());
     } else if args.verify_header.len() > 0 {
