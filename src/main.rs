@@ -50,6 +50,9 @@ struct Args {
     #[clap(long, default_value = "")]
     decode_header: String,
 
+    #[clap(long, default_value = "")]
+    decode_transaction: String,
+
     #[clap(long, default_value_t = 0)]
     start: isize,
 
@@ -63,7 +66,7 @@ struct Args {
     modifier: String,
 
     #[clap(long, default_value = "")]
-    extract_value: String,
+    value: String,
 
     #[clap(long, default_value = "")]
     denom: String,
@@ -360,12 +363,14 @@ fn decode_header_differential(modifier: u128) -> String {
 }
 
 fn decode_transaction_differential(
+    covhash: Address,
     value: u128,
     denom: Denom,
     recipient: String,
 ) -> String {
-    // return covhash, value, denom, recipient
     let mut transaction = random_transaction();
+
+    transaction.outputs[0].covhash = covhash;
 
     transaction.outputs[0].value = CoinValue(value);
 
@@ -540,6 +545,32 @@ fn main() {
         let abi_encoded_integer_and_size = decode_integer_differential(integer);
 
         print!("0x{}", abi_encoded_integer_and_size);
+    } else if args.decode_transaction.len() > 0 {
+        let covhash = args
+            .decode_transaction
+            .strip_prefix("0x")
+            .expect(ERR_STRING);
+        let covhash: Address = Address(HashVal::from_str(covhash).unwrap());
+
+        let value: u128 = args
+            .value
+            .parse()
+            .expect(ERR_STRING);
+
+        let denom: Denom = args
+            .denom
+            .parse()
+            .expect(ERR_STRING);
+
+        let recipient = args
+            .recipient
+            .strip_prefix("0x")
+            .expect(ERR_STRING)
+            .to_string();
+
+        let serialized_tx = decode_transaction_differential(covhash, value, denom, recipient);
+
+        print!("0x{}", serialized_tx);
     } else if args.slice.len() > 0 {
         let data = hex::decode(args.slice.strip_prefix("0x").unwrap())
             .expect(ERR_STRING);
