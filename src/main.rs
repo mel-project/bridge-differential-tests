@@ -435,6 +435,7 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     let mut header = stdcode::serialize(&header).unwrap();
 
     let mut epoch_syms = CoinValue(0);
+    let mut next_epoch_syms = CoinValue(0);
     let mut stakedocs = String::new();
     let mut signatures: Vec<Vec<u8>> = vec![];
 
@@ -447,6 +448,10 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         signatures.push(signature);
 
         epoch_syms += stakedoc.syms_staked;
+
+        if stakedoc.e_start <= epoch + 1 && stakedoc.e_post_end > epoch + 1 {
+            next_epoch_syms += stakedoc.syms_staked;
+        }
 
         let stakedoc = hex::encode(
             stdcode::serialize(&stakedoc).unwrap()
@@ -472,6 +477,9 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     for i in 0..signatures_length {
         signatures_str += &hex::encode(&signatures[i]);
     }
+
+    let next_epoch_syms = hex::encode(stdcode::serialize(&next_epoch_syms).unwrap());
+    stakedocs.insert_str(0, &next_epoch_syms);
 
     let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
     stakedocs.insert_str(0, &epoch_syms);
