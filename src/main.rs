@@ -47,6 +47,9 @@ struct Args {
     #[clap(long, default_value = "")]
     decode_integer: String,
 
+    #[clap(long, default_value = "")]
+    decode_header: String,
+
     #[clap(long, default_value_t = 0)]
     start: isize,
 
@@ -55,12 +58,6 @@ struct Args {
 
     #[clap(long, default_value = "")]
     slice: String,
-
-    #[clap(long, default_value = "")]
-    extract_transactions_hash: String,
-
-    #[clap(long, default_value = "")]
-    extract_block_height: String,
 
     #[clap(long, default_value = "")]
     modifier: String,
@@ -335,7 +332,7 @@ fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
     }
 }
 
-fn extract_transactions_hash_differential(modifier: u128) -> String {
+fn decode_header_differential(modifier: u128) -> String {
     let header = random_header(modifier);
         
     let mut serialized_header = stdcode::serialize(&header)
@@ -352,29 +349,22 @@ fn extract_transactions_hash_differential(modifier: u128) -> String {
     serialized_header.resize(serialized_header_length + padding_length, 0);
 
     format!(
-        "{:0>64x}{}{:0>64x}{:0<64}",
-        0x40,
+        "{:0>64x}{:0>64x}{}{}{:0>64x}{:0<64}",
+        0x80,
+        header.height.0,
         hex::encode(header.transactions_hash),
+        hex::encode(header.stakes_hash),
         serialized_header_length,
         hex::encode(serialized_header)
     )
 }
 
-fn extract_block_height_differential(block_height:u64, modifier: u128) -> String {
-    let mut header = random_header(modifier);
-    header.height = BlockHeight(block_height);
-
-    let serialized_header = stdcode::serialize(&header)
-        .expect(ERR_STRING);
-
-    hex::encode(serialized_header)
-}
-
-fn extract_value_denom_recipient_differential(
+fn decode_transaction_differential(
     value: u128,
     denom: Denom,
     recipient: String,
 ) -> String {
+    // return covhash, value, denom, recipient
     let mut transaction = random_transaction();
 
     transaction.outputs[0].value = CoinValue(value);
@@ -533,6 +523,15 @@ fn main() {
         let key_and_signature = ed25519_differential(&data);
 
         print!("0x{}", key_and_signature);
+    } else if args.decode_header.len() > 0 {
+        let modifier: u128 = args
+            .decode_header
+            .parse()
+            .expect(ERR_STRING);
+
+        let encoded_header_and_members = decode_header_differential(modifier);
+
+        print!("0x{}", encoded_header_and_members);
     } else if args.decode_integer.len() > 0 {
         let integer: u128 = args.decode_integer
             .parse()
@@ -546,41 +545,6 @@ fn main() {
             .expect(ERR_STRING);
 
         print!("0x{}", slice_differential(&data, args.start, args.end));
-    } else if args.extract_transactions_hash.len() > 0 {
-        let modifier: u128 = args.extract_transactions_hash
-            .parse()
-            .expect(ERR_STRING);
-
-        let serialized_header_and_root = extract_transactions_hash_differential(modifier);
-
-        print!("0x{}", serialized_header_and_root);
-    } else if args.extract_block_height.len() > 0 {
-        let block_height: u64 = args.extract_block_height
-            .parse()
-            .expect(ERR_STRING);
-        
-        let modifier: u128 = args.modifier
-            .parse()
-            .expect(ERR_STRING);
-
-        let serialized_header = extract_block_height_differential(block_height, modifier);
-
-        print!("0x{}", serialized_header);
-    } else if args.extract_value.len() > 0 {
-        let value: u128 = args.extract_value
-            .parse()
-            .expect(ERR_STRING);
-
-        let denom = Denom::from_str(&args.denom)
-            .expect(ERR_STRING);
-
-        let recipient = args.recipient
-            .strip_prefix("0x")
-            .expect(ERR_STRING);
-
-        let serialized_transaction = extract_value_denom_recipient_differential(value, denom, recipient.to_string());
-
-        print!("0x{}", serialized_transaction);
     } else if args.big_hash == true {
         print!("0x{}", big_hash_differential());
     } else if args.verify_header.len() > 0 {
