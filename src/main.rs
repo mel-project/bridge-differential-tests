@@ -38,53 +38,77 @@ const ERR_STRING: &str = "0x4572726f7220696e204646492070726f6772616d2e";
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    #[clap(long)]
+    big_hash: bool,
+
     #[clap(long, default_value = "")]
     blake3: String,
-
-    #[clap(long, default_value = "")]
-    ed25519: String,
-
-    #[clap(long, default_value = "")]
-    decode_integer: String,
 
     #[clap(long, default_value = "")]
     decode_header: String,
 
     #[clap(long, default_value = "")]
+    decode_integer: String,
+
+    #[clap(long, default_value = "")]
     decode_transaction: String,
-
-    #[clap(long, default_value_t = 0)]
-    start: isize,
-
-    #[clap(long, default_value_t = 0, allow_hyphen_values = true)]
-    end: isize,
-
-    #[clap(long, default_value = "")]
-    slice: String,
-
-    #[clap(long, default_value = "")]
-    modifier: String,
-
-    #[clap(long, default_value = "")]
-    value: String,
 
     #[clap(long, default_value = "")]
     denom: String,
 
     #[clap(long, default_value = "")]
-    tx_hash: String,
+    ed25519: String,
+
+    #[clap(long, default_value_t = 0, allow_hyphen_values = true)]
+    end: isize,
+
+    #[clap(long, default_value = "")]
+    modifier: String,
 
     #[clap(long, default_value = "")]
     recipient: String,
 
     #[clap(long, default_value = "")]
-    build_tree: String,
+    slice: String,
 
-    #[clap(long)]
-    big_hash: bool,
+    #[clap(long, default_value_t = 0)]
+    start: isize,
+
+    #[clap(long, default_value = "")]
+    tx_hash: String,
+
+    #[clap(long, default_value = "")]
+    value: String,
 
     #[clap(long, default_value = "")]
     verify_header: String,
+
+    #[clap(long, default_value = "")]
+    verify_stakes: String,
+}
+
+fn random_coin_id() -> CoinID {
+    CoinID {
+        txhash: TxHash(HashVal::random()),
+        index: rand::thread_rng().gen(),
+    }
+}
+
+fn random_coindata() -> CoinData {
+    let additional_data_size: u32 = rand::thread_rng().gen_range(0..32);
+    let additional_data_range = 0..additional_data_size;
+    let additional_data: Vec<u8> = additional_data_range
+        .map(|_| {
+            rand::thread_rng().gen::<u8>()
+        })
+        .collect();
+
+    CoinData {
+        covhash: Address(HashVal::random()),
+        value: CoinValue(rand::thread_rng().gen()),
+        denom: Denom::Mel,
+        additional_data
+    }
 }
 
 fn random_header(modifier: u128) -> Header {
@@ -189,27 +213,18 @@ fn random_header(modifier: u128) -> Header {
     }
 }
 
-fn random_coin_id() -> CoinID {
-    CoinID {
-        txhash: TxHash(HashVal::random()),
-        index: rand::thread_rng().gen(),
-    }
-}
+fn random_stakedoc(epoch: u64) -> StakeDoc {
+    let e_start: u64 = rand::thread_rng()
+        .gen_range(0..epoch);
 
-fn random_coindata() -> CoinData {
-    let additional_data_size: u32 = rand::thread_rng().gen_range(0..32);
-    let additional_data_range = 0..additional_data_size;
-    let additional_data: Vec<u8> = additional_data_range
-        .map(|_| {
-            rand::thread_rng().gen::<u8>()
-        })
-        .collect();
+    let e_post_end: u64 = rand::thread_rng()
+        .gen_range(epoch + 1..u64::MAX);
 
-    CoinData {
-        covhash: Address(HashVal::random()),
-        value: CoinValue(rand::thread_rng().gen()),
-        denom: Denom::Mel,
-        additional_data
+    StakeDoc {
+        pubkey: ed25519_keygen().0,
+        e_start,
+        e_post_end,
+        syms_staked: CoinValue(rand::thread_rng().gen_range(0..u32::MAX as u128)),
     }
 }
 
@@ -277,19 +292,37 @@ fn random_transaction() -> Transaction {
     }
 }
 
-fn random_stakedoc(epoch: u64) -> StakeDoc {
-    let e_start: u64 = rand::thread_rng()
-        .gen_range(0..epoch);
+// differential tests
+fn big_hash_differential() -> String {
+    let mut stakes = vec!();
 
-    let e_post_end: u64 = rand::thread_rng()
-        .gen_range(epoch + 1..u64::MAX);
-
-    StakeDoc {
-        pubkey: ed25519_keygen().0,
-        e_start,
-        e_post_end,
-        syms_staked: CoinValue(rand::thread_rng().gen_range(0..u32::MAX as u128)),
+    for _ in 0..50 {
+        stakes.append(
+            &mut stdcode::serialize(
+                &random_stakedoc(rand::thread_rng().gen())
+            ).unwrap()
+        )
     }
+
+    let stakes_length = stakes.len();
+
+    let padding_length = if stakes_length % 64 == 0 {
+        0
+    } else {
+        64 - stakes_length % 64
+    };
+
+    let big_hash = *blake3::keyed_hash(
+        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+        &stakes,
+    ).as_bytes();
+    let big_hash = hex::encode(big_hash);
+
+    stakes.resize(stakes_length + padding_length, 0);
+
+    let stakedocs = hex::encode(stakes);
+
+    format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakes_length, stakedocs)
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -307,32 +340,6 @@ fn ed25519_differential(data: &[u8]) -> String {
     let signature = keypair.sk.sign(data, Some(Noise::generate()));
 
     format!("{}{}", hex::encode(*keypair.pk), hex::encode(*signature))
-}
-
-fn decode_integer_differential(integer: u128) -> String {
-    let encoded_integer = stdcode::serialize(&integer)
-        .expect(ERR_STRING);
-
-    let encoded_integer_length = encoded_integer.len() as u128;
-
-    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_length, encoded_integer_length, hex::encode(encoded_integer))
-}
-
-fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
-    if start < end {
-        let start = start as usize;
-        let end = end as usize;
-
-        hex::encode(&data[start..end])
-    } else {
-        let r_start = (end + 1) as usize;
-        let r_end = (start + 1) as usize;
-    
-        let mut reverse_slice = data[r_start..r_end].to_vec();
-        reverse_slice.reverse();
-
-        hex::encode(reverse_slice)
-    }
 }
 
 fn decode_header_differential(modifier: u128) -> String {
@@ -362,6 +369,15 @@ fn decode_header_differential(modifier: u128) -> String {
     )
 }
 
+fn decode_integer_differential(integer: u128) -> String {
+    let encoded_integer = stdcode::serialize(&integer)
+        .expect(ERR_STRING);
+
+    let encoded_integer_length = encoded_integer.len() as u128;
+
+    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_length, encoded_integer_length, hex::encode(encoded_integer))
+}
+
 fn decode_transaction_differential(
     covhash: Address,
     value: u128,
@@ -385,37 +401,21 @@ fn decode_transaction_differential(
     hex::encode(serialized_transaction)
 }
 
-fn big_hash_differential() -> String {
-    let mut stakedocs = vec![];
-    let range = 0..50;
+fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
+    if start < end {
+        let start = start as usize;
+        let end = end as usize;
 
-    for _ in range {
-        stakedocs.append(
-            &mut stdcode::serialize(
-                &random_stakedoc(rand::thread_rng().gen())
-            ).unwrap()
-        )
-    }
-
-    let stakedocs_length = stakedocs.len();
-
-    let padding_length = if stakedocs_length % 64 == 0 {
-        0
+        hex::encode(&data[start..end])
     } else {
-        64 - stakedocs_length % 64
-    };
+        let r_start = (end + 1) as usize;
+        let r_end = (start + 1) as usize;
+    
+        let mut reverse_slice = data[r_start..r_end].to_vec();
+        reverse_slice.reverse();
 
-    stakedocs.resize(stakedocs_length + padding_length, 0);
-
-    let big_hash = *blake3::keyed_hash(
-        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-        &stakedocs,
-    ).as_bytes();
-    let big_hash = hex::encode(big_hash);
-    let stakedocs = hex::encode(stakedocs);
-
-
-    format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakedocs.len() / 2, stakedocs)
+        hex::encode(reverse_slice)
+    }
 }
 
 fn verify_header_differential(num_stakedocs: u32) -> String {
@@ -436,7 +436,7 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
 
     let mut epoch_syms = CoinValue(0);
     let mut next_epoch_syms = CoinValue(0);
-    let mut stakedocs = String::new();
+    let mut stakes = String::new();
     let mut signatures: Vec<Vec<u8>> = vec![];
 
     for _ in 0..num_stakedocs {
@@ -456,7 +456,7 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         let stakedoc = hex::encode(
             stdcode::serialize(&stakedoc).unwrap()
         );
-        stakedocs += &stakedoc;
+        stakes += &stakedoc;
     }
 
     let header_length = header.len();
@@ -479,28 +479,28 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     }
 
     let next_epoch_syms = hex::encode(stdcode::serialize(&next_epoch_syms).unwrap());
-    stakedocs.insert_str(0, &next_epoch_syms);
+    stakes.insert_str(0, &next_epoch_syms);
 
     let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
-    stakedocs.insert_str(0, &epoch_syms);
+    stakes.insert_str(0, &epoch_syms);
 
     let stakes_hash = blake3::keyed_hash(
         blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-        &hex::decode(&stakedocs).unwrap()
+        &hex::decode(&stakes).unwrap()
     );
     let stakes_hash = hex::encode(stakes_hash.as_bytes());
 
-    let stakedocs_length = stakedocs.len();
-    let stakedocs_padding_length = if stakedocs_length % 64 == 0 {
+    let stakes_length = stakes.len();
+    let stakes_padding_length = if stakes_length % 64 == 0 {
         0
     } else {
-        64 - stakedocs_length % 64
+        64 - stakes_length % 64
     };
 
-    stakedocs = format!(
+    stakes = format!(
         "{:0<width$}",
-        stakedocs,
-        width = stakedocs_length + stakedocs_padding_length
+        stakes,
+        width = stakes_length + stakes_padding_length
     );
 
     // return abi encoded: verifier's block height, verifier's stakes hash, header bytes,
@@ -511,20 +511,56 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         stakes_hash,
         0xa0,
         0xc0 + header.len() / 2,
-        0xe0 + header.len() / 2 + stakedocs.len() / 2,
+        0xe0 + header.len() / 2 + stakes.len() / 2,
         header_length,
         header,
-        stakedocs_length / 2,
-        stakedocs,
+        stakes_length / 2,
+        stakes,
         signatures_length * 2,
         signatures_str
     )
 }
 
+fn verify_stakes_differential(num_stakedocs: u32) -> String {
+    // format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakedocs.len() / 2, stakedocs)
+    let mut stakes= vec!();
+
+    for _ in 0..num_stakedocs {
+        stakes.append(
+            &mut stdcode::serialize(
+                &random_stakedoc(rand::thread_rng().gen())
+            ).unwrap()
+        );
+    };
+
+    let stakes_length = stakes.len();
+
+    let stakes_padding_length = if stakes_length % 64 == 0 {
+        0
+    } else {
+        64 - stakes_length % 64
+    };
+
+    let stakes_hash = *blake3::keyed_hash(
+        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+        &stakes
+    )
+    .as_bytes();
+    let stakes_hash = hex::encode(stakes_hash);
+
+    stakes.resize(stakes_length + stakes_padding_length, 0);
+
+    let stakes = hex::encode(stakes);
+
+    format!("{:0>64x}{}{:0>64x}{}", 0x40, stakes_hash, stakes_length,  stakes)
+}
+
 fn main() {
     let args = Args::parse();
 
-    if args.blake3.len() > 0 {
+    if args.big_hash == true {
+        print!("0x{}", big_hash_differential());
+    } else if args.blake3.len() > 0 {
         let data = hex::decode(args.blake3.strip_prefix("0x").unwrap())
             .expect(ERR_STRING);
 
@@ -584,14 +620,18 @@ fn main() {
             .expect(ERR_STRING);
 
         print!("0x{}", slice_differential(&data, args.start, args.end));
-    } else if args.big_hash == true {
-        print!("0x{}", big_hash_differential());
     } else if args.verify_header.len() > 0 {
         let num_stakedocs: u32 = args.verify_header
             .parse()
             .expect(ERR_STRING);
 
         print!("0x{}", verify_header_differential(num_stakedocs));
+    } else if args.verify_stakes.len() > 0 {
+        let num_stakedocs: u32 = args.verify_stakes
+            .parse()
+            .expect(ERR_STRING);
+
+        print!("0x{}", verify_stakes_differential(num_stakedocs));
     } else {
         print!("0x");
     }
