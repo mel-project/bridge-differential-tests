@@ -68,9 +68,6 @@ struct Args {
     #[clap(long, default_value = "")]
     recipient: String,
 
-    #[clap(long, default_value = "")]
-    slice: String,
-
     #[clap(long, default_value_t = 0)]
     start: isize,
 
@@ -401,23 +398,6 @@ fn decode_transaction_differential(
     hex::encode(serialized_transaction)
 }
 
-fn slice_differential(data: &[u8], start: isize, end: isize) -> String {
-    if start < end {
-        let start = start as usize;
-        let end = end as usize;
-
-        hex::encode(&data[start..end])
-    } else {
-        let r_start = (end + 1) as usize;
-        let r_end = (start + 1) as usize;
-    
-        let mut reverse_slice = data[r_start..r_end].to_vec();
-        reverse_slice.reverse();
-
-        hex::encode(reverse_slice)
-    }
-}
-
 fn verify_header_differential(num_stakedocs: u32) -> String {
     let epoch: u64 = rand::thread_rng().gen_range(0..u32::MAX.into());
     let modifier: u128 = rand::thread_rng().gen();
@@ -615,11 +595,6 @@ fn main() {
         let serialized_tx = decode_transaction_differential(covhash, value, denom, recipient);
 
         print!("0x{}", serialized_tx);
-    } else if args.slice.len() > 0 {
-        let data = hex::decode(args.slice.strip_prefix("0x").unwrap())
-            .expect(ERR_STRING);
-
-        print!("0x{}", slice_differential(&data, args.start, args.end));
     } else if args.verify_header.len() > 0 {
         let num_stakedocs: u32 = args.verify_header
             .parse()
