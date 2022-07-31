@@ -8,6 +8,12 @@ use ed25519_compact::{
     Noise
 };
 use rand::Rng;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rs_merkle::{
+    MerkleTree,
+    MerkleProof,
+    Hasher
+};
 use themelio_structs::{
     Address,
     BlockHeight,
@@ -28,12 +34,25 @@ use tmelcrypt::{
     Ed25519PK
 };
 
+const BRIDGE_COVHASH: HashVal = HashVal([0; 32]);
+
 const STAKE_EPOCH: u64 = 2_000_000;
 
 const DATA_BLOCK_HASH_KEY: &[u8; 13] = b"smt_datablock";
 const NODE_HASH_KEY: &[u8; 8] = b"smt_node";
 
 const ERR_STRING: &str = "0x4572726f7220696e204646492070726f6772616d2e";
+
+#[derive(Clone)]
+pub struct Blake3Algorithm {}
+
+impl Hasher for Blake3Algorithm {
+    type Hash = [u8; 32];
+
+    fn hash(data: &[u8]) -> [u8; 32] {
+        *blake3::keyed_hash(blake3::hash(NODE_HASH_KEY).as_bytes(), data).as_bytes()
+    }
+}
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -82,6 +101,17 @@ struct Args {
 
     #[clap(long, default_value = "")]
     verify_stakes: String,
+
+    #[clap(long, default_value = "")]
+    verify_transaction: String,
+}
+
+fn create_datablocks(num_datablocks: u32) -> Vec<Transaction> {
+    (0..num_datablocks)
+        .map(|_| {
+            random_transaction()
+        })
+        .collect::<Vec<Transaction>>()
 }
 
 fn random_coin_id() -> CoinID {
@@ -92,9 +122,7 @@ fn random_coin_id() -> CoinID {
 }
 
 fn random_coindata() -> CoinData {
-    let additional_data_size: u32 = rand::thread_rng().gen_range(0..32);
-    let additional_data_range = 0..additional_data_size;
-    let additional_data: Vec<u8> = additional_data_range
+    let additional_data: Vec<u8> = (0..20)
         .map(|_| {
             rand::thread_rng().gen::<u8>()
         })
@@ -103,8 +131,19 @@ fn random_coindata() -> CoinData {
     CoinData {
         covhash: Address(HashVal::random()),
         value: CoinValue(rand::thread_rng().gen()),
-        denom: Denom::Mel,
+        denom: random_denom(),
         additional_data
+    }
+}
+
+fn random_denom() -> Denom {
+    let denom_int = rand::thread_rng().gen_range(0..4);
+
+    match denom_int {
+        0 => Denom::Mel,
+        1 => Denom::Sym,
+        2 => Denom::Erg,
+        _ => Denom::Custom(TxHash(HashVal::random()))
     }
 }
 
@@ -230,7 +269,7 @@ fn random_transaction() -> Transaction {
 
     let num_inputs: u32 = rand::thread_rng().gen_range(1..limit);
     let inputs = (0..num_inputs)
-        .into_iter()
+        .into_par_iter()
         .map(|_| {
             random_coin_id()
         })
@@ -238,7 +277,7 @@ fn random_transaction() -> Transaction {
 
     let num_outputs: u32 = rand::thread_rng().gen_range(1..limit);
     let outputs = (0..num_outputs)
-        .into_iter()
+        .into_par_iter()
         .map(|_| {
             random_coindata()
         })
@@ -246,12 +285,12 @@ fn random_transaction() -> Transaction {
 
     let num_covenants: u32 = rand::thread_rng().gen_range(1..limit);
     let covenants = (0..num_covenants)
-        .into_iter()
+        .into_par_iter()
         .map(|_| {
             let size = rand::thread_rng().gen_range(0..limit);
             let range = 0..size;
             let covenant = range
-                .into_iter()
+                .into_par_iter()
                 .map(|_| {
                     rand::thread_rng().gen::<u8>()
                 })
@@ -263,12 +302,12 @@ fn random_transaction() -> Transaction {
 
     let num_sigs: u32 = rand::thread_rng().gen_range(1..limit);
     let sigs = (0..num_sigs)
-        .into_iter()
+        .into_par_iter()
         .map(|_| {
             let size = rand::thread_rng().gen_range(0..limit);
             let range = 0..size;
             let sig = range
-                .into_iter()
+                .into_par_iter()
                 .map(|_| {
                     rand::thread_rng().gen::<u8>()
                 })
@@ -502,7 +541,6 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
 }
 
 fn verify_stakes_differential(num_stakedocs: u32) -> String {
-    // format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakedocs.len() / 2, stakedocs)
     let mut stakes= vec!();
 
     for _ in 0..num_stakedocs {
@@ -533,6 +571,119 @@ fn verify_stakes_differential(num_stakedocs: u32) -> String {
     let stakes = hex::encode(stakes);
 
     format!("{:0>64x}{}{:0>64x}{}", 0x40, stakes_hash, stakes_length,  stakes)
+}
+
+fn verify_transaction_differential(num_transactions: u32) -> String {
+    let block_height = BlockHeight(rand::thread_rng().gen());
+
+    // create random transactions with ethereum addresses in additional_data of first output
+    let mut datablocks = create_datablocks(num_transactions);
+
+    let index: usize = rand::thread_rng()
+        .gen_range(0..num_transactions)
+        .try_into()
+        .expect(ERR_STRING);
+
+    datablocks[index].outputs[0].covhash = Address(BRIDGE_COVHASH);
+
+    let tx_to_prove = datablocks
+        .get(index)
+        .ok_or("Unable to get tx datablock to prove.")
+        .expect(ERR_STRING);
+
+    // create merkle proof for a random tx to verify
+    let leaves: Vec<[u8; 32]> = datablocks
+        .iter()
+        .map(|x| *blake3::keyed_hash(blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(), &stdcode::serialize(&x).unwrap()).as_bytes())
+        .collect();
+
+    let merkle_tree: MerkleTree<Blake3Algorithm> = MerkleTree::<Blake3Algorithm>::from_leaves(&leaves);
+
+    let denom = tx_to_prove
+        .outputs[0]
+        .denom;
+    let denom: HashVal  = match denom {
+        Denom::Mel => HashVal([0; 32]),
+        Denom::Sym => HashVal([0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
+        Denom::Erg => HashVal([0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]),
+        Denom::Custom(tx_hash) => tx_hash.0,
+        _ => HashVal::random()
+    };
+    let denom = hex::encode(denom);
+
+    let value: u128 = tx_to_prove
+        .outputs[0]
+        .value
+        .into();
+
+    let additional_data = &mut tx_to_prove
+        .clone()
+        .outputs[0]
+        .additional_data;
+
+    let mut additional_data_formatted: Vec<u8> = [0; 32].to_vec();
+
+    for i in 0..20 {
+        additional_data_formatted[i + 12] = additional_data[i];
+    }
+
+    let additional_data_formatted = hex::encode(additional_data_formatted);
+
+    let mut serialized_tx = stdcode::serialize(&tx_to_prove)
+        .expect("Unable to serialize tx.");
+
+    let serialized_tx_length = serialized_tx.len();
+
+    let tx_padding_length = if serialized_tx_length % 64 == 0 {
+        0
+    } else {
+        64 - serialized_tx_length % 64
+    };
+
+    serialized_tx.resize(serialized_tx_length + tx_padding_length, 0);
+
+    let serialized_tx = hex::encode(serialized_tx);
+
+    let proof: MerkleProof<Blake3Algorithm> = merkle_tree.proof(&vec![index]);
+    let proof_vec: Vec<[u8; 32]> = proof
+        .proof_hashes()
+        .to_vec();
+
+    let mut proof_str = String::new();
+    for i in 0..proof_vec.len() {
+        proof_str += &hex::encode(&proof_vec[i])
+    };
+
+    let merkle_root: [u8; 32] = merkle_tree
+        .root()
+        .ok_or("Unable to get merkle root.")
+        .expect("Fill in a reason");
+    let merkle_root = hex::encode(merkle_root);
+
+    // returns 
+    // bytes32 transactionsHash,
+    // bytes memory transaction,
+    // uint256 txIndex,
+    // uint256 blockHeight,
+    // bytes32[] memory proof,
+    // uint256 denom,
+    // uint256 value,
+    // address recipient
+    format!(
+        "{}{:0>64x}{:0>64x}{:0>64x}{:0>64x}{}{:0>64x}{}{:0>64x}{}{:0>64x}{}",
+        merkle_root,
+        0x100,
+        index,
+        block_height.0,
+        0x120 + serialized_tx.len() / 2,
+        denom,
+        value,
+        additional_data_formatted,
+        serialized_tx_length,
+        serialized_tx,
+        proof_vec.len(),
+        proof_str
+    )
 }
 
 fn main() {
@@ -596,17 +747,26 @@ fn main() {
 
         print!("0x{}", serialized_tx);
     } else if args.verify_header.len() > 0 {
-        let num_stakedocs: u32 = args.verify_header
+        let num_stakedocs: u32 = args
+            .verify_header
             .parse()
             .expect(ERR_STRING);
 
         print!("0x{}", verify_header_differential(num_stakedocs));
     } else if args.verify_stakes.len() > 0 {
-        let num_stakedocs: u32 = args.verify_stakes
+        let num_stakedocs: u32 = args
+            .verify_stakes
             .parse()
             .expect(ERR_STRING);
 
         print!("0x{}", verify_stakes_differential(num_stakedocs));
+    } else if args.verify_transaction.len() > 0 {
+        let num_transactions = args
+            .verify_transaction
+            .parse()
+            .expect(ERR_STRING);
+
+        print!("0x{}", verify_transaction_differential(num_transactions));
     } else {
         print!("0x");
     }
