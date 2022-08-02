@@ -7,13 +7,9 @@ use ed25519_compact::{
     Seed,
     Noise
 };
+use novasmt::dense::DenseMerkleTree;
 use rand::Rng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use rs_merkle::{
-    MerkleTree,
-    MerkleProof,
-    Hasher
-};
 use themelio_structs::{
     Address,
     BlockHeight,
@@ -34,7 +30,7 @@ use tmelcrypt::{
     Ed25519PK
 };
 
-const BRIDGE_COVHASH: HashVal = HashVal([0; 32]);
+const BRIDGE_COVHASH: Address = Address(HashVal([0; 32]));
 
 const STAKE_EPOCH: u64 = 2_000_000;
 
@@ -42,17 +38,6 @@ const DATA_BLOCK_HASH_KEY: &[u8; 13] = b"smt_datablock";
 const NODE_HASH_KEY: &[u8; 8] = b"smt_node";
 
 const ERR_STRING: &str = "0x4572726f7220696e204646492070726f6772616d2e";
-
-#[derive(Clone)]
-pub struct Blake3Algorithm {}
-
-impl Hasher for Blake3Algorithm {
-    type Hash = [u8; 32];
-
-    fn hash(data: &[u8]) -> [u8; 32] {
-        *blake3::keyed_hash(blake3::hash(NODE_HASH_KEY).as_bytes(), data).as_bytes()
-    }
-}
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -98,6 +83,9 @@ struct Args {
 
     #[clap(long, default_value = "")]
     verify_header: String,
+
+    #[clap(long, default_value = "")]
+    verify_header_cross_epoch: String,
 
     #[clap(long, default_value = "")]
     verify_stakes: String,
@@ -162,7 +150,7 @@ fn random_header(modifier: u128) -> Header {
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
         }
-    } else if modifier == u8::MAX.into() {
+    } else if modifier == <u8 as Into<u128>>::into(u8::MAX) {
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
@@ -176,7 +164,7 @@ fn random_header(modifier: u128) -> Header {
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
         }
-    } else if modifier == u16::MAX.into() {
+    } else if modifier == <u16 as Into<u128>>::into(u16::MAX) {
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
@@ -190,7 +178,7 @@ fn random_header(modifier: u128) -> Header {
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
         }
-    } else if modifier == u32::MAX.into() {
+    } else if modifier == <u32 as Into<u128>>::into(u32::MAX) {
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
@@ -204,7 +192,7 @@ fn random_header(modifier: u128) -> Header {
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
         }
-    } else if modifier == u64::MAX.into() {
+    } else if modifier == <u64 as Into<u128>>::into(u64::MAX) {
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
@@ -218,7 +206,7 @@ fn random_header(modifier: u128) -> Header {
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
         }
-    } else if modifier == u128::MAX {
+    } else if modifier == <u128 as Into<u128>>::into(u128::MAX) {
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
@@ -250,8 +238,13 @@ fn random_header(modifier: u128) -> Header {
 }
 
 fn random_stakedoc(epoch: u64) -> StakeDoc {
-    let e_start: u64 = rand::thread_rng()
-        .gen_range(0..epoch);
+    let e_start: u64;
+    if epoch == 0 {
+        e_start = 0;
+    } else {
+        e_start = rand::thread_rng()
+            .gen_range(0..epoch);
+    }
 
     let e_post_end: u64 = rand::thread_rng()
         .gen_range(epoch + 1..u64::MAX);
@@ -458,8 +451,111 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     let mut stakes = String::new();
     let mut signatures: Vec<Vec<u8>> = vec![];
 
-    for _ in 0..num_stakedocs {
+    for _ in 8..num_stakedocs {
         let mut stakedoc = random_stakedoc(epoch);
+        let keypair = ed25519_keygen();
+        stakedoc.pubkey = Ed25519PK::from_bytes(&keypair.0.0).unwrap();
+
+        let signature = keypair.1.sign(&header);
+        signatures.push(signature);
+
+        epoch_syms += stakedoc.syms_staked;
+
+        if stakedoc.e_start <= epoch + 1 && stakedoc.e_post_end > epoch + 1 {
+            next_epoch_syms += stakedoc.syms_staked;
+        }
+
+        let stakedoc = hex::encode(
+            stdcode::serialize(&stakedoc).unwrap()
+        );
+        stakes += &stakedoc;
+    }
+
+    let header_length = header.len();
+    let header_padding_length = if header_length % 64 == 0 {
+        0
+    } else {
+        64 - header_length % 64
+    };
+
+    header.resize(header_length + header_padding_length, 0);
+
+    let header = hex::encode(header);
+
+
+    let signatures_length = signatures.len();
+
+    let mut signatures_str = String::new();
+    for i in 0..signatures_length {
+        signatures_str += &hex::encode(&signatures[i]);
+    }
+
+    let next_epoch_syms = hex::encode(stdcode::serialize(&next_epoch_syms).unwrap());
+    stakes.insert_str(0, &next_epoch_syms);
+
+    let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
+    stakes.insert_str(0, &epoch_syms);
+
+    let stakes_hash = blake3::keyed_hash(
+        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
+        &hex::decode(&stakes).unwrap()
+    );
+    let stakes_hash = hex::encode(stakes_hash.as_bytes());
+
+    let stakes_length = stakes.len();
+    let stakes_padding_length = if stakes_length % 64 == 0 {
+        0
+    } else {
+        64 - stakes_length % 64
+    };
+
+    stakes = format!(
+        "{:0<width$}",
+        stakes,
+        width = stakes_length + stakes_padding_length
+    );
+
+    // return abi encoded: verifier's block height, verifier's stakes hash, header bytes,
+    // StakeDocs array, and signatures array.
+    format!(
+        "{:0>64x}{}{:0>64x}{:0>64x}{:0>64x}{:0>64x}{}{:0>64x}{}{:0>64x}{}",
+        verifier.height.0,
+        stakes_hash,
+        0xa0,
+        0xc0 + header.len() / 2,
+        0xe0 + header.len() / 2 + stakes.len() / 2,
+        header_length,
+        header,
+        stakes_length / 2,
+        stakes,
+        signatures_length * 2,
+        signatures_str
+    )
+}
+
+fn verify_header_cross_epoch_differential(epoch: u64) -> String {
+    let modifier: u128 = rand::thread_rng().gen();
+
+    let mut verifier = random_header(modifier);
+
+    let new_height = epoch * STAKE_EPOCH - 1;
+    verifier.height = BlockHeight(new_height);
+
+    let modifier: u128 = rand::thread_rng().gen();
+    let mut header = random_header(modifier);
+    header.height = BlockHeight(epoch * STAKE_EPOCH + rand::thread_rng().gen_range(0..200_000));
+
+    let mut header = stdcode::serialize(&header).unwrap();
+
+    let mut epoch_syms = CoinValue(0);
+    let mut next_epoch_syms = CoinValue(0);
+    let mut stakes = String::new();
+    let mut signatures: Vec<Vec<u8>> = vec![];
+
+    let num_stakedocs = rand::thread_rng().gen_range(8..100);
+
+    for _ in 0..num_stakedocs {
+        let mut stakedoc = random_stakedoc(epoch - 1);
         let keypair = ed25519_keygen();
         stakedoc.pubkey = Ed25519PK::from_bytes(&keypair.0.0).unwrap();
 
@@ -584,20 +680,12 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
         .try_into()
         .expect(ERR_STRING);
 
-    datablocks[index].outputs[0].covhash = Address(BRIDGE_COVHASH);
+    datablocks[index].outputs[0].covhash = BRIDGE_COVHASH;
 
     let tx_to_prove = datablocks
         .get(index)
         .ok_or("Unable to get tx datablock to prove.")
         .expect(ERR_STRING);
-
-    // create merkle proof for a random tx to verify
-    let leaves: Vec<[u8; 32]> = datablocks
-        .iter()
-        .map(|x| *blake3::keyed_hash(blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(), &stdcode::serialize(&x).unwrap()).as_bytes())
-        .collect();
-
-    let merkle_tree: MerkleTree<Blake3Algorithm> = MerkleTree::<Blake3Algorithm>::from_leaves(&leaves);
 
     let denom = tx_to_prove
         .outputs[0]
@@ -616,8 +704,7 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
         .value
         .into();
 
-    let additional_data = &mut tx_to_prove
-        .clone()
+    let additional_data = &tx_to_prove
         .outputs[0]
         .additional_data;
 
@@ -644,21 +731,24 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
 
     let serialized_tx = hex::encode(serialized_tx);
 
-    let proof: MerkleProof<Blake3Algorithm> = merkle_tree.proof(&vec![index]);
-    let proof_vec: Vec<[u8; 32]> = proof
-        .proof_hashes()
-        .to_vec();
+    let datablocks_serded = datablocks
+        .iter()
+        .map(|tx| {
+            stdcode::serialize(&tx).unwrap().clone()
+        })
+        .collect::<Vec<_>>();
+
+    let tree = DenseMerkleTree::new(&datablocks_serded);
+
+    let proof = &tree.proof(index);
 
     let mut proof_str = String::new();
-    for i in 0..proof_vec.len() {
-        proof_str += &hex::encode(&proof_vec[i])
+    for i in 0..proof.len() {
+        proof_str += &hex::encode(&proof[i])
     };
 
-    let merkle_root: [u8; 32] = merkle_tree
-        .root()
-        .ok_or("Unable to get merkle root.")
-        .expect("Fill in a reason");
-    let merkle_root = hex::encode(merkle_root);
+    let root = tree.root_hash();
+    let root = hex::encode(root);
 
     // returns 
     // bytes32 transactionsHash,
@@ -671,7 +761,7 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
     // address recipient
     format!(
         "{}{:0>64x}{:0>64x}{:0>64x}{:0>64x}{}{:0>64x}{}{:0>64x}{}{:0>64x}{}",
-        merkle_root,
+        root,
         0x100,
         index,
         block_height.0,
@@ -681,7 +771,7 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
         additional_data_formatted,
         serialized_tx_length,
         serialized_tx,
-        proof_vec.len(),
+        proof.len(),
         proof_str
     )
 }
@@ -753,6 +843,13 @@ fn main() {
             .expect(ERR_STRING);
 
         print!("0x{}", verify_header_differential(num_stakedocs));
+    } else if args.verify_header_cross_epoch.len() > 0 {
+        let epoch: u64 = args
+            .verify_header_cross_epoch
+            .parse()
+            .expect(ERR_STRING);
+
+        print!("0x{}", verify_header_cross_epoch_differential(epoch));
     } else if args.verify_stakes.len() > 0 {
         let num_stakedocs: u32 = args
             .verify_stakes
