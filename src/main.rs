@@ -451,7 +451,7 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     let mut stakes = String::new();
     let mut signatures: Vec<Vec<u8>> = vec![];
 
-    for _ in 8..num_stakedocs {
+    for _ in 0..num_stakedocs {
         let mut stakedoc = random_stakedoc(epoch);
         let keypair = ed25519_keygen();
         stakedoc.pubkey = Ed25519PK::from_bytes(&keypair.0.0).unwrap();
