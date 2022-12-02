@@ -1,6 +1,6 @@
 [package]
 name = "bridge_differential_tests"
-authors = ["Marco Serrano <marcoTheWebDev@gmail.com>"]
+authors = ["Marco Serrano <marco@themelio.com>"]
 version = "0.1.0"
 edition = "2021"
 
@@ -8,13 +8,13 @@ edition = "2021"
 
 [dependencies]
 blake3 = "1.2.0"
-clap = { version = "3.1.15", features = ["derive"] }
+clap = { version = "4.0.22", features = ["derive"] }
 ed25519-compact = "1.0.11"
 hex = "0.4.3"
 novasmt = "0.2.17"
 rand = "0.8.4"
 rayon = "1.5.1"
-stdcode = "0.1.2"
-themelio-stf = "0.9.7"
-themelio-structs = "0.2.0"
-tmelcrypt = "0.2.3"
+stdcode = "0.1.13"
+themelio-stf = "0.11.13"
+themelio-structs = "0.2.12"
+tmelcrypt = "0.2.6"

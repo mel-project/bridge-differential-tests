@@ -4,8 +4,8 @@ use blake3;
 use clap::Parser;
 use ed25519_compact::{
     KeyPair,
+    Noise,
     Seed,
-    Noise
 };
 use novasmt::dense::DenseMerkleTree;
 use rand::Rng;
@@ -20,19 +20,17 @@ use themelio_structs::{
     NetID,
     CoinValue,
     StakeDoc,
+    STAKE_EPOCH,
     Transaction,
     TxKind,
     TxHash,
 };
 use tmelcrypt::{
-    ed25519_keygen,
+    Ed25519SK,
     HashVal,
-    Ed25519PK
 };
 
 const BRIDGE_COVHASH: Address = Address(HashVal([0; 32]));
-
-const STAKE_EPOCH: u64 = 2_000_000;
 
 const DATA_BLOCK_HASH_KEY: &[u8; 13] = b"smt_datablock";
 const NODE_HASH_KEY: &[u8; 8] = b"smt_node";
@@ -250,7 +248,7 @@ fn random_stakedoc(epoch: u64) -> StakeDoc {
         .gen_range(epoch + 1..u64::MAX);
 
     StakeDoc {
-        pubkey: ed25519_keygen().0,
+        pubkey: Ed25519SK::generate().to_public(),
         e_start,
         e_post_end,
         syms_staked: CoinValue(rand::thread_rng().gen_range(0..u32::MAX as u128)),
@@ -453,10 +451,10 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
 
     for _ in 0..num_stakedocs {
         let mut stakedoc = random_stakedoc(epoch);
-        let keypair = ed25519_keygen();
-        stakedoc.pubkey = Ed25519PK::from_bytes(&keypair.0.0).unwrap();
+        let keypair = Ed25519SK::generate();
+        stakedoc.pubkey = keypair.to_public();
 
-        let signature = keypair.1.sign(&header);
+        let signature = keypair.sign(&header);
         signatures.push(signature);
 
         epoch_syms += stakedoc.syms_staked;
@@ -556,10 +554,10 @@ fn verify_header_cross_epoch_differential(epoch: u64) -> String {
 
     for _ in 0..num_stakedocs {
         let mut stakedoc = random_stakedoc(epoch - 1);
-        let keypair = ed25519_keygen();
-        stakedoc.pubkey = Ed25519PK::from_bytes(&keypair.0.0).unwrap();
+        let keypair = Ed25519SK::generate();
+        stakedoc.pubkey = keypair.to_public();
 
-        let signature = keypair.1.sign(&header);
+        let signature = keypair.sign(&header);
         signatures.push(signature);
 
         epoch_syms += stakedoc.syms_staked;
