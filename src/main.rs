@@ -10,7 +10,9 @@ use ed25519_compact::{
 use novasmt::dense::DenseMerkleTree;
 use rand::Rng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use stdcode::StdcodeSerializeExt;
 use themelio_structs::{
+    STAKE_EPOCH,
     Address,
     BlockHeight,
     CoinData,
@@ -20,25 +22,23 @@ use themelio_structs::{
     NetID,
     CoinValue,
     StakeDoc,
-    STAKE_EPOCH,
     Transaction,
     TxKind,
     TxHash,
 };
+use tip911_stakeset::{StakeSet, Tip911};
 use tmelcrypt::{
     Ed25519SK,
     HashVal,
 };
+
 
 const BRIDGE_COVHASH: Address = Address(HashVal([0; 32]));
 
 const DATA_BLOCK_HASH_KEY: &[u8; 13] = b"smt_datablock";
 const NODE_HASH_KEY: &[u8; 8] = b"smt_node";
 
-const ERR_STRING: &str = "0x4572726f7220696e204646492070726f6772616d2e";
-
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
 struct Args {
     #[clap(long)]
     big_hash: bool,
@@ -92,14 +92,6 @@ struct Args {
     verify_transaction: String,
 }
 
-fn create_datablocks(num_datablocks: u32) -> Vec<Transaction> {
-    (0..num_datablocks)
-        .map(|_| {
-            random_transaction()
-        })
-        .collect::<Vec<Transaction>>()
-}
-
 fn random_coin_id() -> CoinID {
     CoinID {
         txhash: TxHash(HashVal::random()),
@@ -108,7 +100,7 @@ fn random_coin_id() -> CoinID {
 }
 
 fn random_coindata() -> CoinData {
-    let additional_data: Vec<u8> = (0..20)
+    let additional_data = (0..20)
         .map(|_| {
             rand::thread_rng().gen::<u8>()
         })
@@ -134,87 +126,24 @@ fn random_denom() -> Denom {
 }
 
 fn random_header(modifier: u128) -> Header {
-    if modifier == 0 {
+    if modifier == 0 || modifier == u8::MAX as u128 || modifier == u16::MAX as u128 || modifier == u32::MAX as u128 ||
+        modifier == u32::MAX as u128 || modifier == u64::MAX as u128 || modifier == u128::MAX {
+        let block_height = if modifier > u64::MAX as u128 {
+            u64::MAX
+        } else {
+            modifier as u64
+        };
+
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
-            height: BlockHeight(u64::MIN),
+            height: BlockHeight(block_height),
             history_hash: HashVal::random(),
             coins_hash: HashVal::random(),
             transactions_hash: HashVal::random(),
-            fee_pool: CoinValue(u128::MIN),
-            fee_multiplier: u128::MIN,
-            dosc_speed: u128::MIN,
-            pools_hash: HashVal::random(),
-            stakes_hash: HashVal::random(),
-        }
-    } else if modifier == <u8 as Into<u128>>::into(u8::MAX) {
-        Header {
-            network: NetID::Mainnet,
-            previous: HashVal::random(),
-            height: BlockHeight(u8::MAX.into()),
-            history_hash: HashVal::random(),
-            coins_hash: HashVal::random(),
-            transactions_hash: HashVal::random(),
-            fee_pool: CoinValue(u8::MAX.into()),
-            fee_multiplier: u8::MAX.into(),
-            dosc_speed: u8::MAX.into(),
-            pools_hash: HashVal::random(),
-            stakes_hash: HashVal::random(),
-        }
-    } else if modifier == <u16 as Into<u128>>::into(u16::MAX) {
-        Header {
-            network: NetID::Mainnet,
-            previous: HashVal::random(),
-            height: BlockHeight(u16::MAX.into()),
-            history_hash: HashVal::random(),
-            coins_hash: HashVal::random(),
-            transactions_hash: HashVal::random(),
-            fee_pool: CoinValue(u16::MAX.into()),
-            fee_multiplier: u16::MAX.into(),
-            dosc_speed: u16::MAX.into(),
-            pools_hash: HashVal::random(),
-            stakes_hash: HashVal::random(),
-        }
-    } else if modifier == <u32 as Into<u128>>::into(u32::MAX) {
-        Header {
-            network: NetID::Mainnet,
-            previous: HashVal::random(),
-            height: BlockHeight(u32::MAX.into()),
-            history_hash: HashVal::random(),
-            coins_hash: HashVal::random(),
-            transactions_hash: HashVal::random(),
-            fee_pool: CoinValue(u32::MAX.into()),
-            fee_multiplier: u32::MAX.into(),
-            dosc_speed: u32::MAX.into(),
-            pools_hash: HashVal::random(),
-            stakes_hash: HashVal::random(),
-        }
-    } else if modifier == <u64 as Into<u128>>::into(u64::MAX) {
-        Header {
-            network: NetID::Mainnet,
-            previous: HashVal::random(),
-            height: BlockHeight(u64::MAX),
-            history_hash: HashVal::random(),
-            coins_hash: HashVal::random(),
-            transactions_hash: HashVal::random(),
-            fee_pool: CoinValue(u64::MAX.into()),
-            fee_multiplier: u64::MAX.into(),
-            dosc_speed: u64::MAX.into(),
-            pools_hash: HashVal::random(),
-            stakes_hash: HashVal::random(),
-        }
-    } else if modifier == <u128 as Into<u128>>::into(u128::MAX) {
-        Header {
-            network: NetID::Mainnet,
-            previous: HashVal::random(),
-            height: BlockHeight(u64::MAX),
-            history_hash: HashVal::random(),
-            coins_hash: HashVal::random(),
-            transactions_hash: HashVal::random(),
-            fee_pool: CoinValue(u128::MAX),
-            fee_multiplier: u128::MAX,
-            dosc_speed: u128::MAX,
+            fee_pool: CoinValue(modifier),
+            fee_multiplier: modifier,
+            dosc_speed: modifier,
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
         }
@@ -255,6 +184,20 @@ fn random_stakedoc(epoch: u64) -> StakeDoc {
     }
 }
 
+fn random_stakes(num_stakedocs: u32, epoch: u64) -> Tip911 {
+    let stakes = (0..num_stakedocs)
+        .into_par_iter()
+        .map(|_| {
+            (TxHash(HashVal::random()), random_stakedoc(epoch))
+        })
+        .collect::<Vec<(TxHash, StakeDoc)>>()
+        .into_iter();
+
+    let stakeset = StakeSet::new(stakes);
+
+    stakeset.post_tip911(epoch)
+}
+
 fn random_transaction() -> Transaction {
     let limit: u32 = 32;
 
@@ -281,7 +224,7 @@ fn random_transaction() -> Transaction {
             let size = rand::thread_rng().gen_range(0..limit);
             let range = 0..size;
             let covenant = range
-                .into_par_iter()
+                .into_iter()
                 .map(|_| {
                     rand::thread_rng().gen::<u8>()
                 })
@@ -298,7 +241,7 @@ fn random_transaction() -> Transaction {
             let size = rand::thread_rng().gen_range(0..limit);
             let range = 0..size;
             let sig = range
-                .into_par_iter()
+                .into_iter()
                 .map(|_| {
                     rand::thread_rng().gen::<u8>()
                 })
@@ -319,37 +262,42 @@ fn random_transaction() -> Transaction {
     }
 }
 
+fn create_datablocks(num_datablocks: u32) -> Vec<Transaction> {
+    (0..num_datablocks)
+        .map(|_| {
+            random_transaction()
+        })
+        .collect::<Vec<Transaction>>()
+}
+
 // differential tests
 fn big_hash_differential() -> String {
-    let mut stakes = vec!();
+    let num_stakedocs = 100;
+    let epoch: u64 = rand::thread_rng().gen();
+    let stakes = random_stakes(num_stakedocs, epoch);
+    let tree = stakes.calculate_merkle();
+    let datablocks = tree.data();
+    let largest_blk = datablocks.last();
 
-    for _ in 0..50 {
-        stakes.append(
-            &mut stdcode::serialize(
-                &random_stakedoc(rand::thread_rng().gen())
-            ).unwrap()
-        )
-    }
+    let largest_blk_len = largest_blk.len();
 
-    let stakes_length = stakes.len();
-
-    let padding_length = if stakes_length % 64 == 0 {
+    let padding_length = if largest_blk_len % 64 == 0 {
         0
     } else {
-        64 - stakes_length % 64
+        64 - largest_blk_len % 64
     };
 
     let big_hash = *blake3::keyed_hash(
         blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-        &stakes,
+        &largest_blk,
     ).as_bytes();
     let big_hash = hex::encode(big_hash);
 
-    stakes.resize(stakes_length + padding_length, 0);
+    largest_blk.resize(largest_blk_len + padding_length, 0);
 
-    let stakedocs = hex::encode(stakes);
+    let encoded_blk = hex::encode(largest_blk);
 
-    format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, stakes_length, stakedocs)
+    format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, largest_blk_len, encoded_blk)
 }
 
 fn blake3_differential(data: &[u8]) -> String {
@@ -373,7 +321,7 @@ fn decode_header_differential(modifier: u128) -> String {
     let header = random_header(modifier);
         
     let mut serialized_header = stdcode::serialize(&header)
-    .expect(ERR_STRING);
+    .unwrap();
 
     let serialized_header_length = serialized_header.len();
 
@@ -398,7 +346,7 @@ fn decode_header_differential(modifier: u128) -> String {
 
 fn decode_integer_differential(integer: u128) -> String {
     let encoded_integer = stdcode::serialize(&integer)
-        .expect(ERR_STRING);
+        .unwrap();
 
     let encoded_integer_length = encoded_integer.len() as u128;
 
@@ -420,10 +368,11 @@ fn decode_transaction_differential(
     transaction.outputs[0].denom = denom;
 
     transaction.outputs[0].additional_data = hex::decode(recipient)
-        .expect(ERR_STRING);
+        .unwrap()
+        .into();
     
     let serialized_transaction = stdcode::serialize(&transaction)
-        .expect(ERR_STRING);
+        .unwrap();
 
     hex::encode(serialized_transaction)
 }
@@ -667,6 +616,8 @@ fn verify_stakes_differential(num_stakedocs: u32) -> String {
     format!("{:0>64x}{}{:0>64x}{}", 0x40, stakes_hash, stakes_length,  stakes)
 }
 
+fn verify_tip911(num_stakedocs: u32) {}
+
 fn verify_transaction_differential(num_transactions: u32) -> String {
     let block_height = BlockHeight(rand::thread_rng().gen());
 
@@ -676,14 +627,14 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
     let index: usize = rand::thread_rng()
         .gen_range(0..num_transactions)
         .try_into()
-        .expect(ERR_STRING);
+        .unwrap();
 
     datablocks[index].outputs[0].covhash = BRIDGE_COVHASH;
 
     let tx_to_prove = datablocks
         .get(index)
         .ok_or("Unable to get tx datablock to prove.")
-        .expect(ERR_STRING);
+        .unwrap();
 
     let denom = tx_to_prove
         .outputs[0]
@@ -730,7 +681,7 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
     let serialized_tx = hex::encode(serialized_tx);
 
     let datablocks_serded = datablocks
-        .iter()
+        .into_par_iter()
         .map(|tx| {
             stdcode::serialize(&tx).unwrap().clone()
         })
@@ -781,12 +732,12 @@ fn main() {
         print!("0x{}", big_hash_differential());
     } else if args.blake3.len() > 0 {
         let data = hex::decode(args.blake3.strip_prefix("0x").unwrap())
-            .expect(ERR_STRING);
+            .unwrap();
 
         print!("0x{}", blake3_differential(&data));
     } else if args.ed25519.len() > 0 {
         let data = hex::decode(args.ed25519.strip_prefix("0x").unwrap())
-            .expect(ERR_STRING);
+            .unwrap();
 
         let key_and_signature = ed25519_differential(&data);
 
@@ -795,7 +746,7 @@ fn main() {
         let modifier: u128 = args
             .decode_header
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
 
         let encoded_header_and_members = decode_header_differential(modifier);
 
@@ -803,7 +754,7 @@ fn main() {
     } else if args.decode_integer.len() > 0 {
         let integer: u128 = args.decode_integer
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
     
         let abi_encoded_integer_and_size = decode_integer_differential(integer);
 
@@ -812,23 +763,23 @@ fn main() {
         let covhash = args
             .decode_transaction
             .strip_prefix("0x")
-            .expect(ERR_STRING);
+            .unwrap();
         let covhash: Address = Address(HashVal::from_str(covhash).unwrap());
 
         let value: u128 = args
             .value
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
 
         let denom: Denom = args
             .denom
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
 
         let recipient = args
             .recipient
             .strip_prefix("0x")
-            .expect(ERR_STRING)
+            .unwrap()
             .to_string();
 
         let serialized_tx = decode_transaction_differential(covhash, value, denom, recipient);
@@ -838,28 +789,28 @@ fn main() {
         let num_stakedocs: u32 = args
             .verify_header
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
 
         print!("0x{}", verify_header_differential(num_stakedocs));
     } else if args.verify_header_cross_epoch.len() > 0 {
         let epoch: u64 = args
             .verify_header_cross_epoch
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
 
         print!("0x{}", verify_header_cross_epoch_differential(epoch));
     } else if args.verify_stakes.len() > 0 {
         let num_stakedocs: u32 = args
             .verify_stakes
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
 
         print!("0x{}", verify_stakes_differential(num_stakedocs));
     } else if args.verify_transaction.len() > 0 {
         let num_transactions = args
             .verify_transaction
             .parse()
-            .expect(ERR_STRING);
+            .unwrap();
 
         print!("0x{}", verify_transaction_differential(num_transactions));
     } else {
