@@ -277,7 +277,7 @@ fn big_hash_differential() -> String {
     let stakes = random_stakes(num_stakedocs, epoch);
     let tree = stakes.calculate_merkle();
     let datablocks = tree.data();
-    let largest_blk = datablocks.last();
+    let largest_blk = datablocks.last().unwrap();
 
     let largest_blk_len = largest_blk.len();
 
@@ -293,9 +293,10 @@ fn big_hash_differential() -> String {
     ).as_bytes();
     let big_hash = hex::encode(big_hash);
 
-    largest_blk.resize(largest_blk_len + padding_length, 0);
+    let mut largest_blk_vec = largest_blk.to_vec();
+    largest_blk_vec.resize(largest_blk_len + padding_length, 0);
 
-    let encoded_blk = hex::encode(largest_blk);
+    let encoded_blk = hex::encode(largest_blk_vec);
 
     format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, largest_blk_len, encoded_blk)
 }

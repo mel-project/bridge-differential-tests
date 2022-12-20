@@ -729,9 +729,9 @@ dependencies = [
 
 [[package]]
 name = "is-terminal"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "927609f78c2913a6f6ac3c27a4fe87f43e2a35367c0c4b0f8265e8f49a104330"
+checksum = "28dfb6c8100ccc63462345b67d1bbc3679177c75ee4bf59bf29c8b1d110b8189"
 dependencies = [
  "hermit-abi 0.2.6",
  "io-lifetimes",
@@ -988,11 +988,11 @@ dependencies = [
 
 [[package]]
 name = "num_cpus"
-version = "1.14.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6058e64324c71e02bc2b150e4f3bc8286db6c83092132ffa3f6b1eab0f9def5"
+checksum = "0fac9e2da13b5eb447a6ce3d392f23a29d8694bff781bf03a16cd9ac8697593b"
 dependencies = [
- "hermit-abi 0.1.19",
+ "hermit-abi 0.2.6",
  "libc",
 ]
 
@@ -1613,10 +1613,10 @@ dependencies = [
 [[package]]
 name = "tip911-stakeset"
 version = "0.1.0"
-source = "git+https://github.com/themeliolabs/themelio-stf?branch=applytx-refactors#9cbcdedf52aaec9a6168949dff8046110d2ce745"
+source = "git+https://github.com/themeliolabs/themelio-stf?branch=applytx-refactors#3f36e0a684486d630c991b5721d340fc7bd6ade4"
 dependencies = [
  "imbl",
- "novasmt 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)",
+ "novasmt 0.2.19 (git+https://github.com/themeliolabs/novasmt?branch=tip-911)",
  "stdcode",
  "themelio-structs 0.3.0-beta.4",
  "tmelcrypt",
