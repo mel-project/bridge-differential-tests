@@ -7,6 +7,9 @@ use ed25519_compact::{
     Noise,
     Seed,
 };
+use ethers::abi::{
+    ethabi::{self, Token},
+};
 use novasmt::dense::DenseMerkleTree;
 use rand::Rng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -585,39 +588,25 @@ fn verify_header_cross_epoch_differential(epoch: u64) -> String {
 }
 
 fn verify_stakes_differential(num_stakedocs: u32) -> String {
-    let mut stakes= vec!();
+    let epoch = rand::thread_rng().gen();
+    let stakes = random_stakes(num_stakedocs, epoch);
+    let tree = stakes.calculate_merkle();
+    let root = tree.root_hash();
+    let dblk_idx = rand::thread_rng().gen_range(0..tree.data().len());
+    let dblk = &tree.data()[dblk_idx];
+    let proof = tree.proof(dblk_idx);
 
-    for _ in 0..num_stakedocs {
-        stakes.append(
-            &mut stdcode::serialize(
-                &random_stakedoc(rand::thread_rng().gen())
-            ).unwrap()
-        );
-    };
+    let token = [
+        Token::FixedBytes(root.into()),
+        Token::Bytes(dblk.to_vec()),
+        Token::Uint(dblk_idx.into()),
+        Token::Array(
+            proof.iter().map(|bytes32| Token::FixedBytes(bytes32.to_vec())).collect()
+        )
+    ];
 
-    let stakes_length = stakes.len();
-
-    let stakes_padding_length = if stakes_length % 64 == 0 {
-        0
-    } else {
-        64 - stakes_length % 64
-    };
-
-    let stakes_hash = *blake3::keyed_hash(
-        blake3::hash(DATA_BLOCK_HASH_KEY).as_bytes(),
-        &stakes
-    )
-    .as_bytes();
-    let stakes_hash = hex::encode(stakes_hash);
-
-    stakes.resize(stakes_length + stakes_padding_length, 0);
-
-    let stakes = hex::encode(stakes);
-
-    format!("{:0>64x}{}{:0>64x}{}", 0x40, stakes_hash, stakes_length,  stakes)
+    hex::encode(ethabi::encode(&token))
 }
-
-fn verify_tip911(num_stakedocs: u32) {}
 
 fn verify_transaction_differential(num_transactions: u32) -> String {
     let block_height = BlockHeight(rand::thread_rng().gen());
@@ -684,7 +673,7 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
     let datablocks_serded = datablocks
         .into_par_iter()
         .map(|tx| {
-            stdcode::serialize(&tx).unwrap().clone()
+            stdcode::serialize(&tx).unwrap()
         })
         .collect::<Vec<_>>();
 
