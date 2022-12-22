@@ -95,6 +95,14 @@ struct Args {
     verify_transaction: String,
 }
 
+fn random_block_height(epoch: Option<u64>) -> BlockHeight {
+    if let Some(epoch) = epoch {
+        BlockHeight(epoch * STAKE_EPOCH + rand::thread_rng().gen_range(0..STAKE_EPOCH))
+    } else {
+        BlockHeight(rand::thread_rng().gen())
+    }
+}
+
 fn random_coin_id() -> CoinID {
     CoinID {
         txhash: TxHash(HashVal::random()),
@@ -128,25 +136,30 @@ fn random_denom() -> Denom {
     }
 }
 
-fn random_header(modifier: u128) -> Header {
-    if modifier == 0 || modifier == u8::MAX as u128 || modifier == u16::MAX as u128 || modifier == u32::MAX as u128 ||
-        modifier == u32::MAX as u128 || modifier == u64::MAX as u128 || modifier == u128::MAX {
-        let block_height = if modifier > u64::MAX as u128 {
-            u64::MAX
-        } else {
-            modifier as u64
-        };
+fn random_header(block_height: Option<BlockHeight>, epoch: Option<u64>, modifier: Option<u128>) -> Header {
+    let height: BlockHeight;
 
+    if let Some(blk_height) = block_height {
+        height = blk_height;
+    } else if let Some(_) = epoch {
+        height = random_block_height(epoch);
+    } else if let Some(number) = modifier {
+        height = BlockHeight(number as u64);
+    } else {
+        height = random_block_height(None)
+    }
+
+    if let Some(number) = modifier {
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
-            height: BlockHeight(block_height),
+            height,
             history_hash: HashVal::random(),
             coins_hash: HashVal::random(),
             transactions_hash: HashVal::random(),
-            fee_pool: CoinValue(modifier),
-            fee_multiplier: modifier,
-            dosc_speed: modifier,
+            fee_pool: CoinValue(number),
+            fee_multiplier: number,
+            dosc_speed: number,
             pools_hash: HashVal::random(),
             stakes_hash: HashVal::random(),
         }
@@ -154,7 +167,7 @@ fn random_header(modifier: u128) -> Header {
         Header {
             network: NetID::Mainnet,
             previous: HashVal::random(),
-            height: BlockHeight(rand::thread_rng().gen()),
+            height,
             history_hash: HashVal::random(),
             coins_hash: HashVal::random(),
             transactions_hash: HashVal::random(),
@@ -167,17 +180,15 @@ fn random_header(modifier: u128) -> Header {
     }
 }
 
-fn random_stakedoc(epoch: u64) -> StakeDoc {
-    let e_start: u64;
-    if epoch == 0 {
-        e_start = 0;
+fn random_stakedoc(epoch: Option<u64>) -> StakeDoc {
+    let epoch = if let Some(epoch) = epoch {
+        epoch
     } else {
-        e_start = rand::thread_rng()
-            .gen_range(0..epoch);
-    }
+        rand::thread_rng().gen()
+    };
 
-    let e_post_end: u64 = rand::thread_rng()
-        .gen_range(epoch + 1..u64::MAX);
+    let e_start = rand::thread_rng().gen_range(0..=epoch);
+    let e_post_end: u64 = rand::thread_rng().gen_range(epoch + 1..u64::MAX);
 
     StakeDoc {
         pubkey: Ed25519SK::generate().to_public(),
@@ -191,7 +202,7 @@ fn random_stakes(num_stakedocs: u32, epoch: u64) -> Tip911 {
     let stakes = (0..num_stakedocs)
         .into_par_iter()
         .map(|_| {
-            (TxHash(HashVal::random()), random_stakedoc(epoch))
+            (TxHash(HashVal::random()), random_stakedoc(Some(epoch)))
         })
         .collect::<Vec<(TxHash, StakeDoc)>>()
         .into_iter();
@@ -284,7 +295,7 @@ fn big_hash_differential() -> String {
 
     let largest_blk_len = largest_blk.len();
 
-    let padding_length = if largest_blk_len % 64 == 0 {
+    let padding_len = if largest_blk_len % 64 == 0 {
         0
     } else {
         64 - largest_blk_len % 64
@@ -297,7 +308,7 @@ fn big_hash_differential() -> String {
     let big_hash = hex::encode(big_hash);
 
     let mut largest_blk_vec = largest_blk.to_vec();
-    largest_blk_vec.resize(largest_blk_len + padding_length, 0);
+    largest_blk_vec.resize(largest_blk_len + padding_len, 0);
 
     let encoded_blk = hex::encode(largest_blk_vec);
 
@@ -322,20 +333,19 @@ fn ed25519_differential(data: &[u8]) -> String {
 }
 
 fn decode_header_differential(modifier: u128) -> String {
-    let header = random_header(modifier);
+    let header = random_header(None, None, Some(modifier));
         
-    let mut serialized_header = stdcode::serialize(&header)
-    .unwrap();
+    let mut header_bytes = header.stdcode();
 
-    let serialized_header_length = serialized_header.len();
+    let header_bytes_len = header_bytes.len();
 
-    let padding_length = if serialized_header_length % 64 == 0 {
+    let padding_len = if header_bytes_len % 64 == 0 {
         0
     } else {
-        64 - serialized_header_length % 64
+        64 - header_bytes_len % 64
     };
 
-    serialized_header.resize(serialized_header_length + padding_length, 0);
+    header_bytes.resize(header_bytes_len + padding_len, 0);
 
     format!(
         "{:0>64x}{:0>64x}{}{}{:0>64x}{:0<64}",
@@ -343,18 +353,17 @@ fn decode_header_differential(modifier: u128) -> String {
         header.height.0,
         hex::encode(header.transactions_hash),
         hex::encode(header.stakes_hash),
-        serialized_header_length,
-        hex::encode(serialized_header)
+        header_bytes_len,
+        hex::encode(header_bytes)
     )
 }
 
 fn decode_integer_differential(integer: u128) -> String {
-    let encoded_integer = stdcode::serialize(&integer)
-        .unwrap();
+    let encoded_integer = integer.stdcode();
 
-    let encoded_integer_length = encoded_integer.len() as u128;
+    let encoded_integer_len = encoded_integer.len() as u128;
 
-    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_length, encoded_integer_length, hex::encode(encoded_integer))
+    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_len, encoded_integer_len, hex::encode(encoded_integer))
 }
 
 fn decode_transaction_differential(
@@ -375,27 +384,17 @@ fn decode_transaction_differential(
         .unwrap()
         .into();
     
-    let serialized_transaction = stdcode::serialize(&transaction)
-        .unwrap();
+    let tx_bytes = transaction.stdcode();
 
-    hex::encode(serialized_transaction)
+    hex::encode(tx_bytes)
 }
 
 fn verify_header_differential(num_stakedocs: u32) -> String {
     let epoch: u64 = rand::thread_rng().gen_range(0..u32::MAX.into());
-    let modifier: u128 = rand::thread_rng().gen();
+    let verifier = random_header(None, Some(epoch), None);
+    let header = random_header(None, Some(epoch), None);
 
-    let mut verifier = random_header(modifier);
-
-    let mut new_height = (epoch - 1) * STAKE_EPOCH;
-    new_height += verifier.height.0 % STAKE_EPOCH;
-    verifier.height = BlockHeight(new_height);
-
-    let modifier: u128 = rand::thread_rng().gen();
-    let mut header = random_header(modifier);
-    header.height = verifier.height + BlockHeight(1);
-
-    let mut header = stdcode::serialize(&header).unwrap();
+    let mut header_bytes = header.stdcode();
 
     let mut epoch_syms = CoinValue(0);
     let mut next_epoch_syms = CoinValue(0);
@@ -403,11 +402,11 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     let mut signatures: Vec<Vec<u8>> = vec![];
 
     for _ in 0..num_stakedocs {
-        let mut stakedoc = random_stakedoc(epoch);
+        let mut stakedoc = random_stakedoc(Some(epoch));
         let keypair = Ed25519SK::generate();
         stakedoc.pubkey = keypair.to_public();
 
-        let signature = keypair.sign(&header);
+        let signature = keypair.sign(&header_bytes);
         signatures.push(signature);
 
         epoch_syms += stakedoc.syms_staked;
@@ -417,34 +416,34 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         }
 
         let stakedoc = hex::encode(
-            stdcode::serialize(&stakedoc).unwrap()
+            stakedoc.stdcode()
         );
         stakes += &stakedoc;
     }
 
-    let header_length = header.len();
-    let header_padding_length = if header_length % 64 == 0 {
+    let header_len = header_bytes.len();
+    let header_padding_len = if header_len % 64 == 0 {
         0
     } else {
-        64 - header_length % 64
+        64 - header_len % 64
     };
 
-    header.resize(header_length + header_padding_length, 0);
+    header_bytes.resize(header_len + header_padding_len, 0);
 
-    let header = hex::encode(header);
+    let header_str = hex::encode(header_bytes);
 
 
-    let signatures_length = signatures.len();
+    let signatures_len = signatures.len();
 
     let mut signatures_str = String::new();
-    for i in 0..signatures_length {
+    for i in 0..signatures_len {
         signatures_str += &hex::encode(&signatures[i]);
     }
 
-    let next_epoch_syms = hex::encode(stdcode::serialize(&next_epoch_syms).unwrap());
+    let next_epoch_syms = hex::encode(next_epoch_syms.stdcode());
     stakes.insert_str(0, &next_epoch_syms);
 
-    let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
+    let epoch_syms = hex::encode(epoch_syms.stdcode());
     stakes.insert_str(0, &epoch_syms);
 
     let stakes_hash = blake3::keyed_hash(
@@ -453,17 +452,17 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     );
     let stakes_hash = hex::encode(stakes_hash.as_bytes());
 
-    let stakes_length = stakes.len();
-    let stakes_padding_length = if stakes_length % 64 == 0 {
+    let stakes_len = stakes.len();
+    let stakes_padding_len = if stakes_len % 64 == 0 {
         0
     } else {
-        64 - stakes_length % 64
+        64 - stakes_len % 64
     };
 
     stakes = format!(
         "{:0<width$}",
         stakes,
-        width = stakes_length + stakes_padding_length
+        width = stakes_len + stakes_padding_len
     );
 
     // return abi encoded: verifier's block height, verifier's stakes hash, header bytes,
@@ -473,30 +472,23 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         verifier.height.0,
         stakes_hash,
         0xa0,
-        0xc0 + header.len() / 2,
-        0xe0 + header.len() / 2 + stakes.len() / 2,
-        header_length,
-        header,
-        stakes_length / 2,
+        0xc0 + header_str.len() / 2,
+        0xe0 + header_str.len() / 2 + stakes.len() / 2,
+        header_len,
+        header_str,
+        stakes_len / 2,
         stakes,
-        signatures_length * 2,
+        signatures_len * 2,
         signatures_str
     )
 }
 
 fn verify_header_cross_epoch_differential(epoch: u64) -> String {
-    let modifier: u128 = rand::thread_rng().gen();
+    let verifier_height = Some(BlockHeight((epoch + 1) * STAKE_EPOCH - 1));
+    let verifier = random_header(verifier_height, None, None);
+    let header = random_header(None, Some(epoch + 1), None);
 
-    let mut verifier = random_header(modifier);
-
-    let new_height = epoch * STAKE_EPOCH - 1;
-    verifier.height = BlockHeight(new_height);
-
-    let modifier: u128 = rand::thread_rng().gen();
-    let mut header = random_header(modifier);
-    header.height = BlockHeight(epoch * STAKE_EPOCH + rand::thread_rng().gen_range(0..200_000));
-
-    let mut header = stdcode::serialize(&header).unwrap();
+    let mut header_bytes = header.stdcode();
 
     let mut epoch_syms = CoinValue(0);
     let mut next_epoch_syms = CoinValue(0);
@@ -506,11 +498,11 @@ fn verify_header_cross_epoch_differential(epoch: u64) -> String {
     let num_stakedocs = rand::thread_rng().gen_range(8..100);
 
     for _ in 0..num_stakedocs {
-        let mut stakedoc = random_stakedoc(epoch - 1);
+        let mut stakedoc = random_stakedoc(Some(epoch - 1));
         let keypair = Ed25519SK::generate();
         stakedoc.pubkey = keypair.to_public();
 
-        let signature = keypair.sign(&header);
+        let signature = keypair.sign(&header_bytes);
         signatures.push(signature);
 
         epoch_syms += stakedoc.syms_staked;
@@ -520,34 +512,34 @@ fn verify_header_cross_epoch_differential(epoch: u64) -> String {
         }
 
         let stakedoc = hex::encode(
-            stdcode::serialize(&stakedoc).unwrap()
+            stakedoc.stdcode()
         );
         stakes += &stakedoc;
     }
 
-    let header_length = header.len();
-    let header_padding_length = if header_length % 64 == 0 {
+    let header_len = header_bytes.len();
+    let header_padding_len = if header_len % 64 == 0 {
         0
     } else {
-        64 - header_length % 64
+        64 - header_len % 64
     };
 
-    header.resize(header_length + header_padding_length, 0);
+    header_bytes.resize(header_len + header_padding_len, 0);
 
-    let header = hex::encode(header);
+    let header_str = hex::encode(header_bytes);
 
 
-    let signatures_length = signatures.len();
+    let signatures_len = signatures.len();
 
     let mut signatures_str = String::new();
-    for i in 0..signatures_length {
+    for i in 0..signatures_len {
         signatures_str += &hex::encode(&signatures[i]);
     }
 
-    let next_epoch_syms = hex::encode(stdcode::serialize(&next_epoch_syms).unwrap());
+    let next_epoch_syms = hex::encode(next_epoch_syms.stdcode());
     stakes.insert_str(0, &next_epoch_syms);
 
-    let epoch_syms = hex::encode(stdcode::serialize(&epoch_syms).unwrap());
+    let epoch_syms = hex::encode(epoch_syms.stdcode());
     stakes.insert_str(0, &epoch_syms);
 
     let stakes_hash = blake3::keyed_hash(
@@ -556,17 +548,17 @@ fn verify_header_cross_epoch_differential(epoch: u64) -> String {
     );
     let stakes_hash = hex::encode(stakes_hash.as_bytes());
 
-    let stakes_length = stakes.len();
-    let stakes_padding_length = if stakes_length % 64 == 0 {
+    let stakes_len = stakes.len();
+    let stakes_padding_len = if stakes_len % 64 == 0 {
         0
     } else {
-        64 - stakes_length % 64
+        64 - stakes_len % 64
     };
 
     stakes = format!(
         "{:0<width$}",
         stakes,
-        width = stakes_length + stakes_padding_length
+        width = stakes_len + stakes_padding_len
     );
 
     // return abi encoded: verifier's block height, verifier's stakes hash, header bytes,
@@ -576,13 +568,13 @@ fn verify_header_cross_epoch_differential(epoch: u64) -> String {
         verifier.height.0,
         stakes_hash,
         0xa0,
-        0xc0 + header.len() / 2,
-        0xe0 + header.len() / 2 + stakes.len() / 2,
-        header_length,
-        header,
-        stakes_length / 2,
+        0xc0 + header_str.len() / 2,
+        0xe0 + header_str.len() / 2 + stakes.len() / 2,
+        header_len,
+        header_str,
+        stakes_len / 2,
         stakes,
-        signatures_length * 2,
+        signatures_len * 2,
         signatures_str
     )
 }
@@ -655,25 +647,24 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
 
     let additional_data_formatted = hex::encode(additional_data_formatted);
 
-    let mut serialized_tx = stdcode::serialize(&tx_to_prove)
-        .expect("Unable to serialize tx.");
+    let mut tx_bytes = tx_to_prove.stdcode();
 
-    let serialized_tx_length = serialized_tx.len();
+    let tx_bytes_len = tx_bytes.len();
 
-    let tx_padding_length = if serialized_tx_length % 64 == 0 {
+    let tx_padding_len = if tx_bytes_len % 64 == 0 {
         0
     } else {
-        64 - serialized_tx_length % 64
+        64 - tx_bytes_len % 64
     };
 
-    serialized_tx.resize(serialized_tx_length + tx_padding_length, 0);
+    tx_bytes.resize(tx_bytes_len + tx_padding_len, 0);
 
-    let serialized_tx = hex::encode(serialized_tx);
+    let tx_str = hex::encode(tx_bytes);
 
     let datablocks_serded = datablocks
         .into_par_iter()
         .map(|tx| {
-            stdcode::serialize(&tx).unwrap()
+            tx.stdcode()
         })
         .collect::<Vec<_>>();
 
@@ -704,12 +695,12 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
         0x100,
         index,
         block_height.0,
-        0x120 + serialized_tx.len() / 2,
+        0x120 + tx_str.len() / 2,
         denom,
         value,
         additional_data_formatted,
-        serialized_tx_length,
-        serialized_tx,
+        tx_bytes_len,
+        tx_str,
         proof.len(),
         proof_str
     )
@@ -772,9 +763,9 @@ fn main() {
             .unwrap()
             .to_string();
 
-        let serialized_tx = decode_transaction_differential(covhash, value, denom, recipient);
+        let tx_bytes = decode_transaction_differential(covhash, value, denom, recipient);
 
-        print!("0x{}", serialized_tx);
+        print!("0x{}", tx_bytes);
     } else if args.verify_header.len() > 0 {
         let num_stakedocs: u32 = args
             .verify_header
