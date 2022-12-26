@@ -7,16 +7,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-blake3 = "1.2.0"
 clap = { version = "4.0.22", features = ["derive"] }
-ed25519-compact = "1.0.11"
 ethers = "1.0.2"
 hex = "0.4.3"
 novasmt = { git = "https://github.com/themeliolabs/novasmt", branch = "tip-911" }
 rand = "0.8.4"
 rayon = "1.5.1"
+serde = "1.0.151"
 stdcode = "0.1.13"
 themelio-stf = "0.11.13"
 themelio-structs = "0.3.0-beta.4"
-tip911-stakeset = { git = "https://github.com/themeliolabs/themelio-stf", branch = "applytx-refactors" }
+tip911-stakeset = { git = "https://github.com/themeliolabs/themelio-stf", branch = "tip-911" }
 tmelcrypt = "0.2.6"
