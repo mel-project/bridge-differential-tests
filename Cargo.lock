@@ -2829,9 +2829,9 @@ checksum = "930c0acf610d3fdb5e2ab6213019aaa04e227ebe9547b0649ba599b16d788bd7"
 
 [[package]]
 name = "serde"
-version = "1.0.151"
+version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fed41fc1a24994d044e6db6935e69511a1153b52c15eb42493b26fa87feba0"
+checksum = "bb7d1f0d3021d347a83e556fc4683dea2ea09d87bccdf88ff5c12545d89d5efb"
 dependencies = [
  "serde_derive",
 ]
@@ -2857,9 +2857,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.151"
+version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "255abe9a125a985c05190d687b320c12f9b1f0b99445e608c21ba0782c719ad8"
+checksum = "af487d118eecd09402d70a5d72551860e788df87b464af30e5ea6a38c75c541e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3271,7 +3271,7 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 [[package]]
 name = "tip911-stakeset"
 version = "0.1.0"
-source = "git+https://github.com/themeliolabs/themelio-stf?branch=tip-911#a82c2b565f86a15cd5386d0fc56c769e3a43048d"
+source = "git+https://github.com/themeliolabs/themelio-stf?branch=tip-911#ba42b2b48d9d3c6f5b3982cf69983c054c734112"
 dependencies = [
  "imbl",
  "novasmt 0.2.19 (git+https://github.com/themeliolabs/novasmt?branch=tip-911)",

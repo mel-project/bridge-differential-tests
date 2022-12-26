@@ -2,9 +2,7 @@ mod cli;
 use cli::{CLI, Subcommand};
 
 use clap::Parser;
-use ethers::abi::{
-    ethabi::{self, Token},
-};
+use ethers::abi::ethabi::{self, Token};
 use novasmt::{
     dense::DenseMerkleTree
 };
@@ -240,7 +238,7 @@ fn create_datablocks(num_datablocks: u32) -> Vec<Transaction> {
         .collect::<Vec<Transaction>>()
 }
 
-fn batch_sign(data: Vec<u8>, keys: Vec<Ed25519SK>) -> Vec<Vec<u8>> {
+fn batch_sign(data: &[u8], keys: Vec<Ed25519SK>) -> Vec<Vec<u8>> {
     let signatures = keys
         .into_par_iter()
         .map(|key| key.sign(&data))
@@ -350,10 +348,15 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     let dblks = tree.data();
     let dblk_idx = rand::thread_rng().gen_range(0..dblks.len());
     let dblk = dblks[dblk_idx].to_vec();
-    let signatures = batch_sign(header.stdcode(), keys);
+    let signatures = batch_sign(&header, keys[..=dblk_idx].to_vec());
 
     let datablock: (u128, u128, Vec<(TxHash, StakeDoc)>) = stdcode::deserialize(&dblk).unwrap();
-    let enough_votes = if datablock.0 >= (stakes.current_total.0 * 2) / 3 { true } else { false };
+    let dblk_stakes = StakeSet::new(datablock.2.into_iter());
+    let dblk_votes = (0..=dblk_idx)
+        .into_iter()
+        .fold(0u128,|accum, idx| accum + dblk_stakes.votes(epoch as u64, keys[idx].to_public()));
+    let total_votes = stakes.current_total.0;
+    let enough_votes = if dblk_votes >= (total_votes * 2) / 3 { true } else { false };
 
     let token = [
         Token::Bool(enough_votes),
