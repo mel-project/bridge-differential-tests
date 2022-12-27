@@ -379,96 +379,43 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
 }
 
 fn verify_header_cross_epoch_differential(epoch: u32) -> String {
-    let verifier_height = Some(BlockHeight((epoch + 1) as u64 * STAKE_EPOCH - 1));
-    let verifier = random_header(verifier_height, None, None);
-    let header = random_header(None, Some(epoch + 1), None);
+    let verifier_height = BlockHeight((epoch + 1) as u64 * STAKE_EPOCH - 1);
+    let header = random_header(None, Some(epoch + 1), None).stdcode();
 
-    let mut header_bytes = header.stdcode();
+    let num_stakedocs = rand::thread_rng().gen_range(1..255);
+    let (keys, stakes) = random_stakes(num_stakedocs, epoch as u64);
+    let tree = stakes.calculate_merkle();
+    let dblks = tree.data();
+    let dblk_idx = rand::thread_rng().gen_range(0..dblks.len());
+    let dblk = dblks[dblk_idx].to_vec();
+    let signatures = batch_sign(&header, keys[..=dblk_idx].to_vec());
 
-    let mut epoch_syms = CoinValue(0);
-    let mut next_epoch_syms = CoinValue(0);
-    let mut stakes = String::new();
-    let mut signatures: Vec<Vec<u8>> = vec![];
+    let datablock: (u128, u128, Vec<(TxHash, StakeDoc)>) = stdcode::deserialize(&dblk).unwrap();
+    let dblk_stakes = StakeSet::new(datablock.2.into_iter());
+    let dblk_votes = (0..=dblk_idx)
+        .into_iter()
+        .fold(0u128,|accum, idx| accum + dblk_stakes.votes((epoch + 1) as u64, keys[idx].to_public()));
+    let total_votes = stakes.next_total.0;
+    let enough_votes = if dblk_votes >= (total_votes * 2) / 3 { true } else { false };
 
-    let num_stakedocs = rand::thread_rng().gen_range(8..100);
+    let token = [
+        Token::Bool(enough_votes),
+        Token::Bytes(header),
+        Token::Uint(verifier_height.0.into()),
+        Token::Bytes(dblk),
+        Token::Array(
+            signatures.iter().map(|signature| {
+                let r = Token::FixedBytes(signature[0..32].to_vec());
+                let s = Token::FixedBytes(signature[32..].to_vec());
 
-    for _ in 0..num_stakedocs {
-        let (mut stakedoc, _) = random_stakedoc(Some((epoch - 1) as u64));
-        let keypair = Ed25519SK::generate();
-        stakedoc.pubkey = keypair.to_public();
+                vec!(r, s)
+            })
+            .flatten()
+            .collect()
+        )
+    ];
 
-        let signature = keypair.sign(&header_bytes);
-        signatures.push(signature);
-
-        epoch_syms += stakedoc.syms_staked;
-
-        if stakedoc.e_start <= (epoch + 1) as u64 && stakedoc.e_post_end > (epoch + 1) as u64 {
-            next_epoch_syms += stakedoc.syms_staked;
-        }
-
-        let stakedoc = hex::encode(
-            stakedoc.stdcode()
-        );
-        stakes += &stakedoc;
-    }
-
-    let header_len = header_bytes.len();
-    let header_padding_len = if header_len % 64 == 0 {
-        0
-    } else {
-        64 - header_len % 64
-    };
-
-    header_bytes.resize(header_len + header_padding_len, 0);
-
-    let header_str = hex::encode(header_bytes);
-
-
-    let signatures_len = signatures.len();
-
-    let mut signatures_str = String::new();
-    for i in 0..signatures_len {
-        signatures_str += &hex::encode(&signatures[i]);
-    }
-
-    let next_epoch_syms = hex::encode(next_epoch_syms.stdcode());
-    stakes.insert_str(0, &next_epoch_syms);
-
-    let epoch_syms = hex::encode(epoch_syms.stdcode());
-    stakes.insert_str(0, &epoch_syms);
-
-    let stakes_hash = novasmt::hash_data(&hex::decode(&stakes).unwrap());
-    let stakes_hash = hex::encode(stakes_hash);
-
-    let stakes_len = stakes.len();
-    let stakes_padding_len = if stakes_len % 64 == 0 {
-        0
-    } else {
-        64 - stakes_len % 64
-    };
-
-    stakes = format!(
-        "{:0<width$}",
-        stakes,
-        width = stakes_len + stakes_padding_len
-    );
-
-    // return abi encoded: verifier's block height, verifier's stakes hash, header bytes,
-    // StakeDocs array, and signatures array.
-    format!(
-        "{:0>64x}{}{:0>64x}{:0>64x}{:0>64x}{:0>64x}{}{:0>64x}{}{:0>64x}{}",
-        verifier.height.0,
-        stakes_hash,
-        0xa0,
-        0xc0 + header_str.len() / 2,
-        0xe0 + header_str.len() / 2 + stakes.len() / 2,
-        header_len,
-        header_str,
-        stakes_len / 2,
-        stakes,
-        signatures_len * 2,
-        signatures_str
-    )
+    hex::encode(ethabi::encode(&token))
 }
 
 fn verify_stakes_differential(num_stakedocs: u32) -> String {
