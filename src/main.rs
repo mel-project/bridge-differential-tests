@@ -255,24 +255,14 @@ fn big_hash_differential() -> String {
     let tree = stakes.calculate_merkle();
     let datablocks = tree.data();
     let largest_blk = datablocks.last().unwrap();
-
-    let largest_blk_len = largest_blk.len();
-
-    let padding_len = if largest_blk_len % 64 == 0 {
-        0
-    } else {
-        64 - largest_blk_len % 64
-    };
-
     let big_hash = novasmt::hash_data(largest_blk);
-    let big_hash = hex::encode(big_hash);
 
-    let mut largest_blk_vec = largest_blk.to_vec();
-    largest_blk_vec.resize(largest_blk_len + padding_len, 0);
+    let tokens = [
+        Token::Bytes(largest_blk.to_vec()),
+        Token::FixedBytes(big_hash.to_vec())
+    ];
 
-    let encoded_blk = hex::encode(largest_blk_vec);
-
-    format!("{:0>64x}{}{:0>64x}{}", 0x40, big_hash, largest_blk_len, encoded_blk)
+    hex::encode(ethabi::encode(&tokens))
 }
 
 fn blake3_differential(data: Vec<u8>) -> String {
@@ -283,35 +273,24 @@ fn blake3_differential(data: Vec<u8>) -> String {
 
 fn ed25519_differential(data: Vec<u8>) -> String {
     let keypair = Ed25519SK::generate();
+    let pub_key = keypair.to_public().0;
     let signature = keypair.sign(&data);
 
-    format!("{}{}", hex::encode(keypair.to_public().0), hex::encode(signature))
+    format!("{}{}", hex::encode(pub_key), hex::encode(signature))
 }
 
 fn decode_header_differential(modifier: u128) -> String {
     let header = random_header(None, None, Some(modifier));
-        
-    let mut header_bytes = header.stdcode();
+    let encoded_header = header.stdcode();
 
-    let header_bytes_len = header_bytes.len();
+    let tokens = [
+        Token::Bytes(encoded_header),
+        Token::Uint(header.height.0.into()),
+        Token::FixedBytes(header.transactions_hash.to_vec()),
+        Token::FixedBytes(header.stakes_hash.to_vec())
+    ];
 
-    let padding_len = if header_bytes_len % 64 == 0 {
-        0
-    } else {
-        64 - header_bytes_len % 64
-    };
-
-    header_bytes.resize(header_bytes_len + padding_len, 0);
-
-    format!(
-        "{:0>64x}{:0>64x}{}{}{:0>64x}{:0<64}",
-        0x80,
-        header.height.0,
-        hex::encode(header.transactions_hash),
-        hex::encode(header.stakes_hash),
-        header_bytes_len,
-        hex::encode(header_bytes)
-    )
+    hex::encode(ethabi::encode(&tokens))
 }
 
 fn decode_integer_differential(integer: u128) -> String {
@@ -358,7 +337,7 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
     let total_votes = stakes.current_total.0;
     let enough_votes = if dblk_votes >= (total_votes * 2) / 3 { true } else { false };
 
-    let token = [
+    let tokens = [
         Token::Bool(enough_votes),
         Token::Bytes(header),
         Token::Uint(verifier_height.into()),
@@ -375,7 +354,7 @@ fn verify_header_differential(num_stakedocs: u32) -> String {
         )
     ];
 
-    hex::encode(ethabi::encode(&token))
+    hex::encode(ethabi::encode(&tokens))
 }
 
 fn verify_header_cross_epoch_differential(epoch: u32) -> String {
@@ -398,7 +377,7 @@ fn verify_header_cross_epoch_differential(epoch: u32) -> String {
     let total_votes = stakes.next_total.0;
     let enough_votes = if dblk_votes >= (total_votes * 2) / 3 { true } else { false };
 
-    let token = [
+    let tokens = [
         Token::Bool(enough_votes),
         Token::Bytes(header),
         Token::Uint(verifier_height.0.into()),
@@ -415,7 +394,7 @@ fn verify_header_cross_epoch_differential(epoch: u32) -> String {
         )
     ];
 
-    hex::encode(ethabi::encode(&token))
+    hex::encode(ethabi::encode(&tokens))
 }
 
 fn verify_stakes_differential(num_stakedocs: u32) -> String {
@@ -427,7 +406,7 @@ fn verify_stakes_differential(num_stakedocs: u32) -> String {
     let dblk = &tree.data()[dblk_idx];
     let proof = tree.proof(dblk_idx);
 
-    let token = [
+    let tokens = [
         Token::FixedBytes(root.into()),
         Token::Bytes(dblk.to_vec()),
         Token::Uint(dblk_idx.into()),
@@ -436,7 +415,7 @@ fn verify_stakes_differential(num_stakedocs: u32) -> String {
         )
     ];
 
-    hex::encode(ethabi::encode(&token))
+    hex::encode(ethabi::encode(&tokens))
 }
 
 fn verify_transaction_differential(num_transactions: u32) -> String {
