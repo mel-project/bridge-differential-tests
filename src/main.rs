@@ -2,7 +2,10 @@ mod cli;
 use cli::{CLI, Subcommand};
 
 use clap::Parser;
-use ethers::abi::ethabi::{self, Token};
+use ethers::{
+    abi::ethabi::{self, Token},
+    types::H160
+};
 use novasmt::{
     dense::DenseMerkleTree
 };
@@ -295,10 +298,14 @@ fn decode_header_differential(modifier: u128) -> String {
 
 fn decode_integer_differential(integer: u128) -> String {
     let encoded_integer = integer.stdcode();
+    let encoded_integer_size = encoded_integer.len() as u128;
 
-    let encoded_integer_len = encoded_integer.len() as u128;
+    let tokens = [
+        Token::Bytes(encoded_integer),
+        Token::Uint(encoded_integer_size.into())
+    ];
 
-    format!("{:0>64x}{:0>64x}{:0>64x}{:0<64}", 0x40, encoded_integer_len, encoded_integer_len, hex::encode(encoded_integer))
+    hex::encode(ethabi::encode(&tokens))
 }
 
 fn decode_transaction_differential(
@@ -308,7 +315,6 @@ fn decode_transaction_differential(
     recipient: ethers::abi::Address,
 ) -> String {
     let mut transaction = random_transaction();
-
     transaction.outputs[0].covhash = Address(covhash);
     transaction.outputs[0].value = CoinValue(value);
     transaction.outputs[0].denom = denom;
@@ -419,16 +425,10 @@ fn verify_stakes_differential(num_stakedocs: u32) -> String {
 }
 
 fn verify_transaction_differential(num_transactions: u32) -> String {
-    let block_height = BlockHeight(rand::thread_rng().gen());
+    let block_height = BlockHeight(rand::thread_rng().gen()).0;
 
-    // create random transactions with ethereum addresses in additional_data of first output
+    let index = rand::thread_rng().gen_range(0..num_transactions) as usize;
     let mut datablocks = create_datablocks(num_transactions);
-
-    let index: usize = rand::thread_rng()
-        .gen_range(0..num_transactions)
-        .try_into()
-        .unwrap();
-
     datablocks[index].outputs[0].covhash = BRIDGE_COVHASH;
 
     let tx_to_prove = datablocks
@@ -436,83 +436,50 @@ fn verify_transaction_differential(num_transactions: u32) -> String {
         .ok_or("Unable to get tx datablock to prove.")
         .unwrap();
 
-    let denom = tx_to_prove
-        .outputs[0]
-        .denom;
-    let denom: HashVal  = match denom {
+    let denom: HashVal  = match tx_to_prove.outputs[0].denom {
         Denom::Mel => HashVal([0; 32]),
         Denom::Sym => HashVal([0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
         Denom::Erg => HashVal([0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]),
         Denom::Custom(tx_hash) => tx_hash.0,
         _ => HashVal::random()
     };
-    let denom = hex::encode(denom);
 
-    let value: u128 = tx_to_prove
+    let value = tx_to_prove
         .outputs[0]
         .value
-        .into();
+        .0;
 
-    let additional_data = &tx_to_prove
+    let recipient = &tx_to_prove
         .outputs[0]
         .additional_data;
 
-    let mut additional_data_formatted: Vec<u8> = [0; 32].to_vec();
+    let tx_bytes = tx_to_prove.stdcode();
 
-    for i in 0..20 {
-        additional_data_formatted[i + 12] = additional_data[i];
-    }
-
-    let additional_data_formatted = hex::encode(additional_data_formatted);
-
-    let mut tx_bytes = tx_to_prove.stdcode();
-
-    let tx_bytes_len = tx_bytes.len();
-
-    let tx_padding_len = if tx_bytes_len % 64 == 0 {
-        0
-    } else {
-        64 - tx_bytes_len % 64
-    };
-
-    tx_bytes.resize(tx_bytes_len + tx_padding_len, 0);
-
-    let tx_str = hex::encode(tx_bytes);
-
-    let datablocks_serded = datablocks
+    let datablocks_bytes = datablocks
+        .clone()
         .into_par_iter()
         .map(|tx| {
             tx.stdcode()
         })
         .collect::<Vec<_>>();
-
-    let tree = DenseMerkleTree::new(&datablocks_serded);
-
+    let tree = DenseMerkleTree::new(&datablocks_bytes);
+    let transactions_hash = tree.root_hash().to_vec();
     let proof = &tree.proof(index);
 
-    let mut proof_str = String::new();
-    for i in 0..proof.len() {
-        proof_str += &hex::encode(&proof[i])
-    };
+    let tokens = [
+        Token::FixedBytes(transactions_hash),
+        Token::Bytes(tx_bytes),
+        Token::Uint(index.into()),
+        Token::Uint(block_height.into()),
+        Token::Array(
+            proof.iter().map(|bytes32| Token::FixedBytes(bytes32.to_vec())).collect()
+        ),
+        Token::Uint(denom.0.into()),
+        Token::Uint(value.into()),
+        Token::Address(H160(recipient.to_vec().try_into().unwrap()))
+    ];
 
-    let root = tree.root_hash();
-    let root = hex::encode(root);
-
-    format!(
-        "{}{:0>64x}{:0>64x}{:0>64x}{:0>64x}{}{:0>64x}{}{:0>64x}{}{:0>64x}{}",
-        root,
-        0x100,
-        index,
-        block_height.0,
-        0x120 + tx_str.len() / 2,
-        denom,
-        value,
-        additional_data_formatted,
-        tx_bytes_len,
-        tx_str,
-        proof.len(),
-        proof_str
-    )
+    hex::encode(ethabi::encode(&tokens))
 }
 fn main() {
     let cli = CLI::parse();
